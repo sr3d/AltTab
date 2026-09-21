@@ -1,0 +1,117 @@
+<p align="center">
+  <img src="Resources/AppIcon.png" width="128" alt="AltTab icon">
+</p>
+
+<h1 align="center">AltTab</h1>
+
+<p align="center">
+  A tiny macOS menu-bar app that switches between <b>windows</b>, not apps.<br>
+  <a href="https://github.com/sr3d/AltTab/actions/workflows/build.yml"><img src="https://github.com/sr3d/AltTab/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+</p>
+
+Cmd+Tab activates a whole app, so every window of that app jumps forward and buries what you were looking at. **Option+Tab** brings back just the one window you were in before. Hold Option to pick any window from a list that you can pin, number and filter.
+
+<p align="center"><img src="docs/switcher.png" width="620" alt="The switcher panel"></p>
+
+## Features
+- **Previous window in one tap:** Option+Tab jumps to the last window you used. Only that window comes forward, so multi-window apps like Sublime Text, Chrome or Terminal don't flood the screen.
+- **Focus history:** the list is ordered by the windows you actually used most recently, not by stacking order. It stays correct after a Cmd+Tab brings a whole app forward.
+- **Pins:** keep favourite windows at the top. Drag to reorder them.
+- **Number keys:** press 1–9 or 0 to jump straight to a row. Pinned windows get the first numbers.
+- **Quick filter:** start typing to narrow the list by window title or app name.
+- **Keyboard or mouse:** arrow keys, Tab/Shift+Tab, hover, the scroll wheel and clicks all work.
+- **Adjustable size:** set the font size in Preferences; the whole panel scales with it.
+
+| Filter | Larger font |
+|---|---|
+| <img src="docs/filter.png" alt="Filtering the list"> | <img src="docs/large-font.png" alt="20 pt font size"> |
+
+## Install
+1. Download `AltTab-x.y.z.zip` from [Releases](https://github.com/sr3d/AltTab/releases), unzip it, and move `AltTab.app` to `/Applications`.
+2. The release builds are not notarized, so macOS blocks the first launch. Open **System Settings → Privacy & Security** and click **Open Anyway**, or run:
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/AltTab.app
+   ```
+3. Launch it and grant **Accessibility** when asked (System Settings → Privacy & Security → Accessibility). The menu-bar label reads `AltTab ⚠︎` until the permission is active, then just `AltTab`.
+
+Turn on **Launch at Login** from the menu-bar menu.
+
+## Usage
+| Keys | Action |
+|---|---|
+| **Option+Tab** (tap) | switch to the previous window |
+| **Option** held + **Tab** | open the list; release Option to switch |
+
+While the list is open:
+
+| Keys / mouse | Action |
+|---|---|
+| Tab / → / ↓ · Shift+Tab / ← / ↑ | move the selection |
+| 1–9, 0 | jump straight to that row |
+| `=` or click 📌 | pin / unpin the window |
+| drag a pinned row | reorder pins |
+| `` ` `` or click the filter bar | keep the list open after releasing Option |
+| type letters | filter (every word must match the title or app name); Backspace edits |
+| hover / scroll wheel | select the row under the mouse / step through rows |
+| Return or click a row | switch to that window |
+| Esc | clear the filter, or close the list if the filter is empty |
+| click outside (when kept open) | close |
+
+Any mouse use in the list also keeps it open, so letting go of Option doesn't switch mid-click.
+
+Scope and limits:
+- The list covers visible windows on the current Space. Minimized windows, hidden apps and other Spaces aren't listed.
+- Pins last until AltTab quits.
+- Focus history starts when AltTab launches; before that, the list uses stacking order.
+
+### Preferences
+Menu bar → **AltTab → Preferences…** (⌘,)
+
+<img src="docs/preferences.png" width="440" alt="Preferences window">
+
+**Font size** ranges from 11 to 28 pt (default 14). Rows, icons, the filter bar and the panel width all scale with it.
+
+## Build from source
+Requires macOS 13+ and Swift 5.9+. The Command Line Tools are enough; Xcode is only needed for universal (arm64 + x86_64) builds.
+
+```sh
+./scripts/build-app.sh --open      # build, sign, install to ~/Applications, launch
+./scripts/build-app.sh --no-install
+ALTTAB_UNIVERSAL=1 ./scripts/build-app.sh --no-install   # needs Xcode
+```
+
+**Signing:** macOS ties the Accessibility grant to the code signature. The script signs with an identity named `AltTab Dev` if one exists, otherwise with your first `Apple Development` certificate. Either one stays the same across rebuilds, so the grant sticks. If neither exists, the script falls back to an ad-hoc signature, and you'd have to re-grant Accessibility after every build. To create a stable identity for free: Keychain Access → Certificate Assistant → Create a Certificate… (Name `AltTab Dev`, Type *Code Signing*). If the grant gets stuck, run `tccutil reset Accessibility com.sr3d.AltTab` and relaunch.
+
+**CI:** [`.github/workflows/build.yml`](.github/workflows/build.yml) builds a universal, ad-hoc-signed app on every push and pull request and uploads it as a workflow artifact. Pushing a `v*` tag also publishes a GitHub Release with the zip attached:
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+**Developer tools:**
+- `swift run FocusSpike` lists on-screen windows; `swift run FocusSpike <title>` focuses one.
+- `.build/debug/AltTab --screenshots docs` regenerates the README screenshots. It renders the real panel with made-up window titles.
+- `swift scripts/make-icon.swift` regenerates the app icon.
+- Debug logging:
+  ```sh
+  defaults write com.sr3d.AltTab debug -bool true   # then relaunch
+  log stream --predicate 'subsystem == "com.sr3d.AltTab"'
+  ```
+
+## How it works
+| File | Role |
+|---|---|
+| `Sources/AltTab/HotkeyTap.swift` | `CGEventTap` for Option+Tab and the keys used while the list is open. Keys are swallowed so they never reach the app underneath. |
+| `Sources/AltTab/WindowTracker.swift` | Builds the focus history from an `AXObserver` per app plus workspace activation events. It also keeps a background cache of each app's windows: some apps take seconds to answer Accessibility queries, so a keypress never waits on them. |
+| `Sources/AltTab/Switcher.swift` | List state: ordering, pins, filter, number keys, stay-open mode |
+| `Sources/AltTab/SwitcherPanel.swift` | The non-activating HUD panel and its mouse handling |
+| `Sources/AltTabCore/WindowList.swift` | On-screen windows (`CGWindowListCopyWindowInfo`), matched to Accessibility windows via `_AXUIElementGetWindow` |
+| `Sources/AltTabCore/WindowFocuser.swift` | Brings exactly one window forward: `_SLPSSetFrontProcessWithOptions` + a synthetic make-key event + an AX raise |
+| `Sources/AltTabCore/PrivateAPIs.swift` | Private SkyLight calls, loaded with `dlopen`. If a symbol is missing, focusing falls back to public APIs. |
+
+Raising one window without bringing its whole app forward isn't possible with public APIs alone. The technique comes from [yabai](https://github.com/koekeishiya/yabai) and [Hammerspoon](https://github.com/Hammerspoon/hammerspoon/issues/370#issuecomment-545545468), as refined by [alt-tab-macos](https://github.com/lwouis/alt-tab-macos). This project is a separate, much smaller app and isn't affiliated with alt-tab-macos.
+
+### Why there's no "always on top" pin
+macOS doesn't let one app change the window level of another app's window. yabai can do it by injecting code into the Dock, but that requires partially disabling System Integrity Protection. The only SIP-safe workaround is a live ScreenCaptureKit mirror in a floating panel, which is view-only and needs Screen Recording permission.
+
+## License
+[MIT](LICENSE)
