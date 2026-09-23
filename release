@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Cuts a release: bumps the version in Resources/Info.plist, commits, tags vX.Y.Z and pushes
-# main and the tag. The tag push makes GitHub build the DMG and publish the release
+# Cuts a release: bumps the version in Resources/Info.plist, points the README's Download
+# button at the new AltTab-X.Y.Z.dmg, commits, tags vX.Y.Z and pushes main and the tag. The tag push makes GitHub build the DMG and publish the release
 # (.github/workflows/release.yml).
 #
 #   ./release            patch: 0.1.0 -> 0.1.1
@@ -49,9 +49,11 @@ if [[ "$YES" != "1" ]]; then
     [[ "$answer" == [yY]* ]] || die "cancelled"
 fi
 
-if [[ "$VERSION" != "$CURRENT" ]]; then
-    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
-    git add "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
+# The DMG link works once GitHub has built the release (a few minutes after the push).
+sed -E -i '' "s#releases/download/v[0-9.]+/AltTab-[0-9.]+\.dmg#releases/download/$TAG/AltTab-$VERSION.dmg#" README.md
+if [[ -n "$(git status --porcelain)" ]]; then
+    git add "$PLIST" README.md
     git commit --quiet -m "Release $TAG"
 fi
 git tag -a "$TAG" -m "AltTab $VERSION"

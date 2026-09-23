@@ -12,7 +12,7 @@
 Cmd+Tab activates a whole app, so every window of that app jumps forward and buries what you were looking at. **Option+Tab** brings back just the one window you were in before. Hold Option to pick any window from a list that you can pin, number and filter.
 
 <p align="center">
-  <a href="https://github.com/sr3d/AltTab/releases/latest/download/AltTab.dmg"><img src="https://img.shields.io/github/v/release/sr3d/AltTab?style=for-the-badge&logo=apple&label=Download%20for%20macOS&color=2ea44f" height="48" alt="Download AltTab for macOS"></a><br>
+  <a href="https://github.com/sr3d/AltTab/releases/download/v0.1.1/AltTab-0.1.1.dmg"><img src="https://img.shields.io/github/v/release/sr3d/AltTab?style=for-the-badge&logo=apple&label=Download%20for%20macOS&color=2ea44f" height="48" alt="Download AltTab for macOS"></a><br>
   <sub>macOS 13 or later · Apple Silicon and Intel · <a href="#install">install steps</a> · <a href="https://github.com/sr3d/AltTab/releases">all releases</a></sub>
 </p>
 
@@ -103,7 +103,7 @@ ALTTAB_UNIVERSAL=1 ./scripts/build-app.sh --no-install   # needs Xcode
 
 **CI:** both workflows run `scripts/make-dmg.sh` to build a universal, ad-hoc-signed app and package it as a DMG and a zip. [`build.yml`](.github/workflows/build.yml) runs on every push to `main` and every pull request, and uploads them as a workflow artifact. [`release.yml`](.github/workflows/release.yml) runs when a `v*` tag is pushed, and publishes a GitHub Release with both files attached. GitHub builds everything on its own macOS machines.
 
-**Releasing:** either run `./release` from an up-to-date `main`, or open the Actions tab → **Make New Release** → Run workflow. Both bump the version in `Resources/Info.plist`, commit it, tag it `vX.Y.Z` and push; GitHub then builds and publishes the release, and the README's Download button points at it.
+**Releasing:** either run `./release` from an up-to-date `main`, or open the Actions tab → **Make New Release** → Run workflow. Both bump the version in `Resources/Info.plist`, point the README's Download button at the new `AltTab-X.Y.Z.dmg`, commit, tag `vX.Y.Z` and push; GitHub then builds and publishes the release.
 ```sh
 ./release            # 0.1.0 -> 0.1.1
 ./release minor      # 0.1.0 -> 0.2.0 (also: major, or an exact version like 1.4.2)

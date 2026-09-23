@@ -1,6 +1,6 @@
 name: Build
 
-# Every push to main and every pull request builds AltTab.dmg (and a zip of the app) and
+# Every push to main and every pull request builds AltTab-<version>.dmg (and a zip of the app) and
 # uploads them as a workflow artifact. Releases are built by release.yml.
 on:
   push:

@@ -1,8 +1,7 @@
 name: Release
 
 # Pushing a tag like v1.2.0 (./release does it) builds AltTab 1.2.0 and publishes a GitHub
-# Release with the DMG and a zip of the app attached, plus the DMG as AltTab.dmg for the
-# README's "latest" download link. "Make New Release" (make-release.yml) calls it too.
+# Release with AltTab-X.Y.Z.dmg and a zip of the app attached. "Make New Release" (make-release.yml) calls it too.
 # Re-running it (or running it by hand for an existing tag) replaces the release's files.
 on:
   push:
@@ -64,9 +63,8 @@ jobs:
           DMG: ${{ steps.package.outputs.dmg }}
           ZIP: ${{ steps.package.outputs.zip }}
         run: |
-          cp "$DMG" build/AltTab.dmg   # fixed name: releases/latest/download/AltTab.dmg
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$DMG" "$ZIP" build/AltTab.dmg --clobber
+            gh release upload "$TAG" "$DMG" "$ZIP" --clobber
           else
-            gh release create "$TAG" "$DMG" "$ZIP" build/AltTab.dmg --verify-tag --title "AltTab $TAG" --generate-notes
+            gh release create "$TAG" "$DMG" "$ZIP" --verify-tag --title "AltTab $TAG" --generate-notes
           fi
