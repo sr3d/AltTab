@@ -11,7 +11,22 @@
 
 Cmd+Tab activates a whole app, so every window of that app jumps forward and buries what you were looking at. **Option+Tab** brings back just the one window you were in before. Hold Option to pick any window from a list that you can pin, number and filter.
 
+<p align="center">
+  <a href="https://github.com/sr3d/AltTab/releases/latest/download/AltTab.dmg"><img src="https://img.shields.io/github/v/release/sr3d/AltTab?style=for-the-badge&logo=apple&label=Download%20for%20macOS&color=2ea44f" height="48" alt="Download AltTab for macOS"></a><br>
+  <sub>macOS 13 or later · Apple Silicon and Intel · <a href="#install">install steps</a> · <a href="https://github.com/sr3d/AltTab/releases">all releases</a></sub>
+</p>
+
 <p align="center"><img src="docs/switcher.png" width="620" alt="The switcher panel"></p>
+
+## Install
+1. Click **Download for macOS** above (or pick a version from [Releases](https://github.com/sr3d/AltTab/releases)), open the DMG, and drag `AltTab.app` onto the `Applications` shortcut.
+2. The release builds are not notarized, so macOS blocks the first launch. Open **System Settings → Privacy & Security** and click **Open Anyway**, or run:
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/AltTab.app
+   ```
+3. Launch it and grant **Accessibility** when asked (System Settings → Privacy & Security → Accessibility). The menu-bar label reads `AltTab ⚠︎` until the permission is active, then just `AltTab`.
+
+Turn on **Launch at Login** from the menu-bar menu or Preferences.
 
 ## Features
 - **Previous window in one tap:** Option+Tab jumps to the last window you used. Only that window comes forward, so multi-window apps like Sublime Text, Chrome or Terminal don't flood the screen.
@@ -30,16 +45,6 @@ Cmd+Tab activates a whole app, so every window of that app jumps forward and bur
 | <img src="docs/filter.png" alt="Filtering the list"> | <img src="docs/large-font.png" alt="20 pt font size"> | <img src="docs/apps.png" alt="App switcher"> |
 
 <p align="center"><img src="docs/apps-icons.png" width="620" alt="Cmd+Tab app switcher, icons layout"></p>
-
-## Install
-1. Download `AltTab-x.y.z.dmg` from [Releases](https://github.com/sr3d/AltTab/releases), open it, and drag `AltTab.app` onto the `Applications` shortcut. A `.zip` of the app is there too.
-2. The release builds are not notarized, so macOS blocks the first launch. Open **System Settings → Privacy & Security** and click **Open Anyway**, or run:
-   ```sh
-   xattr -dr com.apple.quarantine /Applications/AltTab.app
-   ```
-3. Launch it and grant **Accessibility** when asked (System Settings → Privacy & Security → Accessibility). The menu-bar label reads `AltTab ⚠︎` until the permission is active, then just `AltTab`.
-
-Turn on **Launch at Login** from the menu-bar menu or Preferences.
 
 ## Usage
 | Keys | Action |
@@ -96,9 +101,12 @@ ALTTAB_UNIVERSAL=1 ./scripts/build-app.sh --no-install   # needs Xcode
 
 **Signing:** macOS ties the Accessibility grant to the code signature. The script signs with an identity named `AltTab Dev` if one exists, otherwise with your first `Apple Development` certificate. Either one stays the same across rebuilds, so the grant sticks. If neither exists, the script falls back to an ad-hoc signature, and you'd have to re-grant Accessibility after every build. To create a stable identity for free: Keychain Access → Certificate Assistant → Create a Certificate… (Name `AltTab Dev`, Type *Code Signing*). If the grant gets stuck, run `tccutil reset Accessibility com.sr3d.AltTab` and relaunch.
 
-**CI:** both workflows run `scripts/make-dmg.sh` to build a universal, ad-hoc-signed app and package it as a DMG and a zip. [`build.yml`](.github/workflows/build.yml) runs on every push to `main` and every pull request, and uploads them as a workflow artifact. [`release.yml`](.github/workflows/release.yml) runs when a `v*` tag is pushed, and publishes a GitHub Release with both files attached. GitHub builds everything on its own macOS machines, so a release is just a tag:
+**CI:** both workflows run `scripts/make-dmg.sh` to build a universal, ad-hoc-signed app and package it as a DMG and a zip. [`build.yml`](.github/workflows/build.yml) runs on every push to `main` and every pull request, and uploads them as a workflow artifact. [`release.yml`](.github/workflows/release.yml) runs when a `v*` tag is pushed, and publishes a GitHub Release with both files attached. GitHub builds everything on its own macOS machines.
+
+**Releasing:** either run `./release` from an up-to-date `main`, or open the Actions tab → **Make New Release** → Run workflow. Both bump the version in `Resources/Info.plist`, commit it, tag it `vX.Y.Z` and push; GitHub then builds and publishes the release, and the README's Download button points at it.
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+./release            # 0.1.0 -> 0.1.1
+./release minor      # 0.1.0 -> 0.2.0 (also: major, or an exact version like 1.4.2)
 ```
 To rebuild the files for an existing tag, run **Release** by hand from the Actions tab and enter the tag.
 

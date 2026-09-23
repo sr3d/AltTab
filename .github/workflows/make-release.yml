@@ -1,0 +1,50 @@
+name: Make New Release
+
+# Actions tab -> "Make New Release" -> Run workflow: bumps the version, commits and tags it on
+# main (the same ./release script), then builds and publishes the release.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to increase (ignored if a version is given below)
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Or an exact version, e.g. 1.4.2 (optional)
+        required: false
+
+permissions:
+  contents: write   # to push the version commit and tag, and create the release
+
+concurrency:
+  group: make-release
+
+jobs:
+  tag:
+    runs-on: macos-15   # ./release uses PlistBuddy
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Bump, commit, tag and push
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUMP: ${{ inputs.version || inputs.bump }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ./release --yes "$BUMP"
+          echo "tag=$(git describe --tags --exact-match --match 'v*')" >> "$GITHUB_OUTPUT"
+
+  # A tag pushed with the workflow's own token doesn't start other workflows, so build here.
+  release:
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}

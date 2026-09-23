@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Cuts a release: bumps the version in Resources/Info.plist, commits, tags vX.Y.Z and pushes
+# main and the tag. The tag push makes GitHub build the DMG and publish the release
+# (.github/workflows/release.yml).
+#
+#   ./release            patch: 0.1.0 -> 0.1.1
+#   ./release minor      0.1.0 -> 0.2.0
+#   ./release major      0.1.0 -> 1.0.0
+#   ./release 1.4.2      exactly this version
+#   ./release -y ...     don't ask for confirmation (used by the "Make New Release" action)
+set -euo pipefail
+cd "$(dirname "$0")"
+
+PLIST="Resources/Info.plist"
+YES=0
+BUMP="patch"
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes) YES=1 ;;
+        -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
+        *) BUMP="$arg" ;;
+    esac
+done
+
+die() { echo "release: $*" >&2; exit 1; }
+
+CURRENT="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")"
+[[ "$CURRENT" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || die "can't parse version '$CURRENT' in $PLIST"
+MAJOR="${BASH_REMATCH[1]}" MINOR="${BASH_REMATCH[2]}" PATCH="${BASH_REMATCH[3]}"
+case "$BUMP" in
+    patch) VERSION="$MAJOR.$MINOR.$((PATCH + 1))" ;;
+    minor) VERSION="$MAJOR.$((MINOR + 1)).0" ;;
+    major) VERSION="$((MAJOR + 1)).0.0" ;;
+    *)     VERSION="${BUMP#v}"
+           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "expected patch, minor, major or X.Y.Z, got '$BUMP'" ;;
+esac
+TAG="v$VERSION"
+
+# Release only what's on GitHub's main, from a clean tree, as a new tag.
+[[ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]] || die "switch to main first"
+[[ -z "$(git status --porcelain)" ]] || die "commit or stash your changes first"
+git fetch --quiet --tags origin main
+[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || die "main isn't in sync with origin/main; pull or push first"
+! git rev-parse --quiet --verify "refs/tags/$TAG" >/dev/null || die "$TAG already exists"
+
+echo "Releasing AltTab $VERSION (was $CURRENT)"
+if [[ "$YES" != "1" ]]; then
+    read -r -p "Commit, tag $TAG and push? [y/N] " answer
+    [[ "$answer" == [yY]* ]] || die "cancelled"
+fi
+
+if [[ "$VERSION" != "$CURRENT" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
+    git add "$PLIST"
+    git commit --quiet -m "Release $TAG"
+fi
+git tag -a "$TAG" -m "AltTab $VERSION"
+git push --quiet --atomic origin main "$TAG"
+
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo sr3d/AltTab)"
+echo "Pushed $TAG. GitHub is building the release:"
+echo "  https://github.com/$REPO/actions/workflows/release.yml"
+echo "  https://github.com/$REPO/releases/tag/$TAG"
