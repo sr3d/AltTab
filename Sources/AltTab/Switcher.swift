@@ -16,6 +16,10 @@ final class Switcher {
     private var all: [WindowInfo] = []        // MRU order for this session
     private var visible: [WindowInfo] = []    // pinned first, then the rest, filtered
     private var selectedID: CGWindowID?       // by ID so pinning/filtering keeps the selection
+    /// Where the keyboard is: the list (the selected row), the filter bar, or a quick-launch
+    /// icon. Shift+Tab climbs from the first row to the filter, then to the first icon.
+    private enum Focus: Equatable { case list, filter, launcher(Int) }
+    private var focus = Focus.list
     private var query = ""
     private var stayOpen = false
     private var windowPins: [CGWindowID] = [] // session-lifetime, in pin order
@@ -26,6 +30,7 @@ final class Switcher {
     }
     private var launchers: [QuickLaunchApp] = [] // quick-launch bar, read at start
     private var launcherItems: [SwitcherPanel.Launcher] = []
+    private var launcherKeys: [String?] = []     // each launcher's Shift+key
     private var showTimer: Timer?
     private var outsideClickMonitor: Any?
     /// Long enough that a quick tap doesn't flash the panel. The panel is built right away and
@@ -42,6 +47,7 @@ final class Switcher {
         // Any mouse use keeps the panel open, so releasing Option mid-click/drag doesn't switch.
         panel.onHighlight = { [weak self] index in
             guard let self, visible.indices.contains(index) else { return }
+            focus = .list
             selectedID = visible[index].id
             enterStayOpen()
             render()
@@ -57,11 +63,15 @@ final class Switcher {
         }
         panel.onHeaderClick = { [weak self] in self?.enterStayOpen() }
         panel.onHover = { [weak self] index in
-            guard let self, visible.indices.contains(index), visible[index].id != selectedID else { return }
+            guard let self, visible.indices.contains(index), focus != .list || visible[index].id != selectedID else { return }
+            focus = .list
             selectedID = visible[index].id
             render()
         }
-        panel.onScroll = { [weak self] in self?.move($0) }
+        panel.onScroll = { [weak self] delta in
+            self?.focus = .list
+            self?.move(delta)
+        }
         panel.onLaunch = { [weak self] in self?.launch($0) }
         panel.onMovePin = { [weak self] from, to in
             guard let self, visible.indices.contains(from), visible.indices.contains(to) else { return }
@@ -85,27 +95,40 @@ final class Switcher {
         }
         switch action {
         case .start, .prepare: break
-        case .next: move(+1)
-        case .previous: move(-1)
+        case .next: stepForward()
+        case .previous: stepBack()
         case .jump(let n):
             if visible.indices.contains(n - 1) { finish(focusing: visible[n - 1]) }
-        case .launch(let n):
-            launch(n - 1)
+        case .launch(let key):
+            if let index = launcherKeys.firstIndex(of: key) {
+                launch(index)
+            } else if let letter = key.last, letter.isLetter {
+                // No app has Shift+this letter: it's just typing (Shift+C filters by "c").
+                type(String(letter))
+            }
         case .togglePin:
-            if let id = selectedID { togglePin(id) }
+            if focus == .list, let id = selectedID { togglePin(id) }
         case .stayOpen:
             enterStayOpen()
         case .type(let text):
-            query += text
-            applyFilter(selectFirst: true)
-            render()
+            // A letter that's an app's own key opens it, unless you're already filtering: the
+            // filter has text or focus, or keep-open mode is on.
+            if query.isEmpty, focus != .filter, !stayOpen, let index = launcherKeys.firstIndex(of: text) {
+                return launch(index)
+            }
+            type(text)
         case .deleteBackward:
             guard !query.isEmpty else { return }
+            focus = .list
             query.removeLast()
             applyFilter(selectFirst: true)
             render()
         case .confirm, .commit:
-            finish(focusing: selectedIndex.map { visible[$0] })
+            switch focus {
+            case .list: finish(focusing: selectedIndex.map { visible[$0] })
+            case .filter: finish(focusing: nil)
+            case .launcher(let i): launch(i)
+            }
         case .escape:
             if query.isEmpty {
                 finish(focusing: nil)
@@ -139,8 +162,10 @@ final class Switcher {
         // no listed window (e.g. Finder with none open), all[0] is already the previous one.
         let previous = all[0].id == current ? min(1, all.count - 1) : 0
         launchers = Settings.quickLaunchApps
-        launcherItems = launchers.map { .init(name: $0.name, icon: $0.icon) }
+        launcherKeys = QuickLaunch.keys(launchers)
+        launcherItems = zip(launchers, launcherKeys).map { .init(name: $0.name, icon: $0.icon, shortcut: QuickLaunch.label($1)) }
         query = ""
+        focus = .list
         applyFilter(selectFirst: false)
         // Pins are listed first, so pick the start window by MRU position, then find it.
         selectedID = reverse ? visible.last?.id : all[previous].id
@@ -179,7 +204,10 @@ final class Switcher {
         let rows = windows.enumerated().map { i, w in
             SwitcherPanel.Row(window: w, number: i < 10 ? String((i + 1) % 10) : nil, isPinned: false)
         }
-        let launchers = Settings.quickLaunchApps.map { SwitcherPanel.Launcher(name: $0.name, icon: $0.icon) }
+        let apps = Settings.quickLaunchApps
+        let launchers = zip(apps, QuickLaunch.keys(apps)).map {
+            SwitcherPanel.Launcher(name: $0.name, icon: $0.icon, shortcut: QuickLaunch.label($1))
+        }
         panel.show(rows, selected: rows.isEmpty ? nil : 0, query: "", stayOpen: false,
                    placeholder: "Type to filter windows", visible: false, launchers: launchers)
         panel.prime()
@@ -227,6 +255,49 @@ final class Switcher {
         if selectFirst || selectedIndex == nil { selectedID = visible.first?.id }
     }
 
+    /// Adds typed text to the filter.
+    private func type(_ text: String) {
+        focus = .list
+        query += text
+        applyFilter(selectFirst: true)
+        render()
+    }
+
+    /// Tab / → / ↓: down the list (wrapping at the end); from the quick-launch icons, right
+    /// and then back down to the filter; from the filter, to the first row.
+    private func stepForward() {
+        switch focus {
+        case .list:
+            return move(+1)
+        case .filter:
+            focus = .list
+            selectedID = visible.first?.id
+        case .launcher(let i):
+            focus = i + 1 < shownLaunchers ? .launcher(i + 1) : .filter
+        }
+        render()
+    }
+
+    /// Shift+Tab / ← / ↑: up the list; from the first row to the filter (rather than wrapping
+    /// to the oldest window), then to the first quick-launch icon, then left along the icons.
+    private func stepBack() {
+        switch focus {
+        case .list:
+            if let index = selectedIndex, index > 0 { return move(-1) }
+            focus = .filter
+        case .filter:
+            guard shownLaunchers > 0 else { return }
+            focus = .launcher(0)
+        case .launcher(let i):
+            guard i > 0 else { return }
+            focus = .launcher(i - 1)
+        }
+        render()
+    }
+
+    /// Quick-launch icons that fit in the bar (and so can take keyboard focus).
+    private var shownLaunchers: Int { min(launcherItems.count, panel.shownLauncherCount) }
+
     private func move(_ delta: Int) {
         guard !visible.isEmpty else { return }
         let current = selectedIndex ?? 0
@@ -273,10 +344,12 @@ final class Switcher {
         let rows = visible.enumerated().map { i, w in
             SwitcherPanel.Row(window: w, number: i < 10 ? String((i + 1) % 10) : nil, isPinned: pinnedSet.contains(w.id))
         }
-        panel.show(rows, selected: selectedIndex, query: query, stayOpen: stayOpen,
+        var focusedLauncher: Int?
+        if case .launcher(let i) = focus { focusedLauncher = i }
+        panel.show(rows, selected: focus == .list ? selectedIndex : nil, query: query, stayOpen: stayOpen,
                    placeholder: mode == .windows ? "Type to filter windows" : "Type to filter apps",
                    layout: mode == .apps ? Settings.appSwitcherLayout : .list, visible: !offscreen,
-                   launchers: launcherItems)
+                   launchers: launcherItems, filterFocused: focus == .filter, focusedLauncher: focusedLauncher)
     }
 
     /// Single exit path: hides everything, resets per-session state, returns the hotkey to idle.

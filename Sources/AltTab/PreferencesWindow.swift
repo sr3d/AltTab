@@ -196,7 +196,7 @@ final class PreferencesWindow: NSWindowController {
 
     private func quickLaunchView() -> NSView {
         let title = sectionTitle("Quick Launch")
-        let hint = note("Apps you use all the time, shown as icons at the top of the switcher. While the switcher is open, press Shift+1…9, 0 to open one, or click its icon. Add apps with + or by dragging them here from Finder; drag to reorder.")
+        let hint = note("Apps you use all the time, shown as icons at the top of the switcher. While the switcher is open, press Shift+1…9, 0 to open one, or click its icon. Click a shortcut and press a key to give the app its own instead: a letter like C for Calendar (press it right after Cmd+Tab, before typing a filter), or hold Shift for Shift+S. Add apps with + or by dragging them here from Finder; drag to reorder.")
         let stack = NSStackView(views: [title, hint, quickLaunchEditor.makeView(width: contentWidth)])
         stack.orientation = .vertical
         stack.alignment = .leading

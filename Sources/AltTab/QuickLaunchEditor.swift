@@ -2,7 +2,8 @@ import AppKit
 import UniformTypeIdentifiers
 
 /// Preferences list of quick-launch apps: add with + (or drop apps from Finder), remove with −
-/// (or Delete), drag to reorder. Every change is saved immediately.
+/// (or Delete), drag to reorder, click an app's shortcut to give it its own key.
+/// Every change is saved immediately.
 final class QuickLaunchEditor: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     private static let rowType = NSPasteboard.PasteboardType("com.sr3d.AltTab.quick-launch-row")
 
@@ -89,6 +90,17 @@ final class QuickLaunchEditor: NSObject, NSTableViewDataSource, NSTableViewDeleg
         save()
     }
 
+    /// Gives the app at `row` its own key token (nil: back to its position's digit). An app that
+    /// already had that key loses it.
+    private func setKey(_ key: String?, forRow row: Int) {
+        guard apps.indices.contains(row) else { return }
+        if let key {
+            for i in apps.indices where apps[i].key == key { apps[i].key = nil }
+        }
+        apps[row].key = key
+        save()
+    }
+
     private func save() {
         Settings.quickLaunchApps = apps
         QuickLaunch.warm()
@@ -111,9 +123,8 @@ final class QuickLaunchEditor: NSObject, NSTableViewDataSource, NSTableViewDeleg
         let name = NSTextField(labelWithString: app.location == nil ? "\(app.name) (not found)" : app.name)
         name.lineBreakMode = .byTruncatingTail
         name.textColor = app.location == nil ? .secondaryLabelColor : .labelColor
-        let shortcut = NSTextField(labelWithString: QuickLaunch.shortcut(row) ?? "")
-        shortcut.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        shortcut.textColor = .secondaryLabelColor
+        let shortcut = ShortcutRecorder(key: QuickLaunch.keys(apps)[row], isCustom: app.key != nil)
+        shortcut.onChange = { [weak self] key in self?.setKey(key, forRow: row) }
         shortcut.setContentCompressionResistancePriority(.required, for: .horizontal)
         for v in [icon, name, shortcut] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -175,6 +186,66 @@ final class QuickLaunchEditor: NSObject, NSTableViewDataSource, NSTableViewDeleg
     private func droppedApps(_ info: NSDraggingInfo) -> [URL] {
         let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
         return (urls ?? []).filter { $0.pathExtension == "app" }
+    }
+}
+
+/// An app's shortcut in the list ("C", "⇧C"). Click it, then press a letter (with or without
+/// Shift) or Shift+digit to make that the app's key; Delete goes back to the position's digit;
+/// Esc or clicking away cancels.
+private final class ShortcutRecorder: NSButton {
+    var onChange: ((String?) -> Void)?
+    private let key: String?
+    private let isCustom: Bool
+    private var isRecording = false { didSet { updateTitle() } }
+
+    init(key: String?, isCustom: Bool) {
+        (self.key, self.isCustom) = (key, isCustom)
+        super.init(frame: .zero)
+        bezelStyle = .recessed
+        showsBorderOnlyWhileMouseInside = true
+        setButtonType(.momentaryPushIn)
+        font = .monospacedDigitSystemFont(ofSize: 12, weight: isCustom ? .semibold : .regular)
+        toolTip = "Click, then press a letter (C) or hold Shift for Shift+letter (⇧S) or Shift+digit to open this app with that key. Delete resets it."
+        target = self
+        action = #selector(startRecording)
+        updateTitle()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func updateTitle() {
+        let text = isRecording ? "Press a key…" : QuickLaunch.label(key) ?? "Set key"
+        let color: NSColor = isRecording ? .controlAccentColor : isCustom ? .labelColor : .secondaryLabelColor
+        attributedTitle = NSAttributedString(string: text, attributes: [.font: font as Any, .foregroundColor: color])
+    }
+
+    @objc private func startRecording() {
+        isRecording = window?.makeFirstResponder(self) ?? false
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func resignFirstResponder() -> Bool {
+        isRecording = false
+        return super.resignFirstResponder()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isRecording else { return super.keyDown(with: event) }
+        // Without any modifiers: Shift+1 reads "1", not "!".
+        let chars = event.characters(byApplyingModifiers: [])?.lowercased() ?? ""
+        switch event.keyCode {
+        case 53: // Esc
+            window?.makeFirstResponder(nil)
+        case 51, 117: // Delete, Forward Delete
+            window?.makeFirstResponder(nil)
+            onChange?(nil)
+        default:
+            let token = QuickLaunch.token(chars, shift: event.modifierFlags.contains(.shift))
+            guard QuickLaunch.isValidKey(token) else { NSSound.beep(); return }
+            window?.makeFirstResponder(nil)
+            onChange?(token)
+        }
     }
 }
 

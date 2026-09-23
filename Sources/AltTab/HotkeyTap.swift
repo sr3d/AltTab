@@ -10,7 +10,7 @@ final class HotkeyTap {
     enum Action {
         case start(SwitcherMode, reverse: Bool), next, previous
         case jump(Int)                 // 1-based row number
-        case launch(Int)               // Shift+number: 1-based quick-launch item
+        case launch(String)            // Shift+letter/digit: a quick-launch key token ("⇧c", "⇧1")
         case togglePin, stayOpen, confirm, escape
         case type(String), deleteBackward
         case commit                    // trigger modifier released while held
@@ -124,15 +124,19 @@ final class HotkeyTap {
         default: break
         }
         if let arrow = Self.arrowKeys[key] { return arrow }
+        let shift = event.flags.contains(.maskShift)
         if let digit = Self.digitKeys[key] {
-            return event.flags.contains(.maskShift) ? .launch(digit) : .jump(digit)
+            return shift ? .launch(QuickLaunch.token(String(digit % 10), shift: true)) : .jump(digit)
         }
         // Read the character without modifiers so Option+T filters by "t", not "†".
         guard let chars = NSEvent(cgEvent: event)?.charactersIgnoringModifiers?.lowercased(),
               let scalar = chars.unicodeScalars.first,
               !CharacterSet.controlCharacters.contains(scalar),
               !(0xF700...0xF8FF).contains(scalar.value) else { return nil } // function/navigation keys
-        return .type(chars)
+        // Shift+letter may be a quick-launch key; the switcher types it if no app has it. (A
+        // plain letter may be one too; the switcher decides, since it depends on the filter.)
+        let token = QuickLaunch.token(chars, shift: true)
+        return shift && QuickLaunch.isValidKey(token) ? .launch(token) : .type(chars)
     }
 
     private func send(_ action: Action) {

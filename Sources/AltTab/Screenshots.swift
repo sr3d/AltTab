@@ -119,9 +119,9 @@ enum Screenshots {
         }
     }
 
-    /// Quick-launch bar items for the main screenshot.
+    /// Quick-launch bar items for the main screenshot; Calendar shows a custom key (C).
     private static func demoLaunchers() -> [SwitcherPanel.Launcher] {
-        [
+        let apps = [
             "/System/Library/CoreServices/Finder.app",
             "/Applications/Safari.app",
             "/System/Applications/Utilities/Terminal.app",
@@ -129,8 +129,10 @@ enum Screenshots {
             "/System/Applications/Notes.app",
             "/System/Applications/Calendar.app",
         ].filter { FileManager.default.fileExists(atPath: $0) }.map { path in
-            let name = FileManager.default.displayName(atPath: path)
-            return .init(name: name.hasSuffix(".app") ? String(name.dropLast(4)) : name, icon: NSWorkspace.shared.icon(forFile: path))
+            QuickLaunchApp(path: path, bundleID: nil, key: path.hasSuffix("Calendar.app") ? "c" : nil)
+        }
+        return zip(apps, QuickLaunch.keys(apps)).map { app, key in
+            .init(name: app.name, icon: NSWorkspace.shared.icon(forFile: app.path), shortcut: QuickLaunch.label(key))
         }
     }
 

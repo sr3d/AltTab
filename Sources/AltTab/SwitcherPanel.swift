@@ -8,7 +8,7 @@ enum SwitcherLayout: String { case list, icons }
 /// Borderless, non-activating HUD listing windows; never takes focus from the target app.
 /// Layout: a filter/hint header, then numbered rows (pinned first, separated by a hairline),
 /// or a strip of numbered app icons with the selected app's name underneath. An optional
-/// quick-launch bar of app icons (Shift+1…0) sits above the filter bar.
+/// quick-launch bar of app icons (Shift+1…0, or a key of your choosing) sits above the filter bar.
 /// With "Show switcher on all displays" on, an identical copy is centered on every screen;
 /// all copies share the callbacks below, so any of them can drive the switcher.
 final class SwitcherPanel {
@@ -22,6 +22,7 @@ final class SwitcherPanel {
     struct Launcher {
         let name: String
         let icon: NSImage?
+        let shortcut: String?   // "⇧C", "⇧1"; nil when it has none
     }
 
     /// One HUD window and its row stack; SwitcherPanel keeps one per target screen.
@@ -102,8 +103,11 @@ final class SwitcherPanel {
         var ids: [CGWindowID], titles: [String], names: [String], pins: [Bool], numbers: [String?]
         var query: String, stayOpen: Bool, placeholder: String, layout: SwitcherLayout
         var launchers: [String], screens: [NSRect], fontSize: CGFloat, firstVisible: Int
+        var filterFocused: Bool, focusedLauncher: Int?
     }
     private var lastContent: Content?
+    /// How many quick-launch icons the last `show` fit in the bar.
+    private(set) var shownLauncherCount = 0
     /// The selection the last `show` used; the list only follows the selection when it moves,
     /// so scrolling with the scrollbar isn't undone by the next highlight refresh.
     private var lastSelected: Int?
@@ -133,10 +137,12 @@ final class SwitcherPanel {
     }
 
     func show(_ rows: [Row], selected: Int?, query: String, stayOpen: Bool, placeholder: String = "Type to filter",
-              layout: SwitcherLayout = .list, visible: Bool = true, launchers: [Launcher] = []) {
+              layout: SwitcherLayout = .list, visible: Bool = true, launchers: [Launcher] = [],
+              filterFocused: Bool = false, focusedLauncher: Int? = nil) {
         lastShow = { [weak self] in
             self?.show(rows, selected: selected, query: query, stayOpen: stayOpen, placeholder: placeholder,
-                       layout: layout, visible: true, launchers: launchers)
+                       layout: layout, visible: true, launchers: launchers,
+                       filterFocused: filterFocused, focusedLauncher: focusedLauncher)
         }
         let screens = targetScreens
         // Match one panel per screen; handles displays added/removed between invocations.
@@ -168,8 +174,9 @@ final class SwitcherPanel {
 
         let content = Content(ids: rows.map(\.window.id), titles: rows.map(\.window.title), names: rows.map(\.window.appName),
                               pins: rows.map(\.isPinned), numbers: rows.map(\.number), query: query, stayOpen: stayOpen,
-                              placeholder: placeholder, layout: layout, launchers: launchers.map(\.name),
-                              screens: screens.map(\.frame), fontSize: fontSize, firstVisible: firstVisible)
+                              placeholder: placeholder, layout: layout, launchers: launchers.map { "\($0.name) \($0.shortcut ?? "")" },
+                              screens: screens.map(\.frame), fontSize: fontSize, firstVisible: firstVisible,
+                              filterFocused: filterFocused, focusedLauncher: focusedLauncher)
         if content == lastContent, shownCount == min(panels.count, screens.count) {
             for screenPanel in panels.prefix(shownCount) {
                 screenPanel.rowViews.forEach { $0.setHighlighted($0.index == selected) }
@@ -180,6 +187,7 @@ final class SwitcherPanel {
         }
         lastContent = content
         shownCount = min(panels.count, screens.count)
+        shownLauncherCount = 0
 
         for (screenPanel, screen) in zip(panels, screens) {
             let (panel, stack) = (screenPanel.panel, screenPanel.stack)
@@ -202,13 +210,13 @@ final class SwitcherPanel {
             screenPanel.scroller.isHidden = true
 
             if !launchers.isEmpty {
-                let bar = makeLauncherBar(launchers, width: innerWidth)
+                let bar = makeLauncherBar(launchers, focused: focusedLauncher, width: innerWidth)
                 add(bar, to: stack, width: innerWidth)
                 stack.setCustomSpacing(launcherGap, after: bar)
                 height += launcherHeight + launcherGap
             }
 
-            let header = makeHeader(query: query, stayOpen: stayOpen, placeholder: placeholder)
+            let header = makeHeader(query: query, stayOpen: stayOpen, focused: filterFocused, placeholder: placeholder)
             add(header, to: stack, width: innerWidth)
             height += headerHeight + stack.spacing
 
@@ -434,20 +442,22 @@ final class SwitcherPanel {
     private var launcherHeight: CGFloat { (48 * scale).rounded() }
     private var launcherGap: CGFloat { (6 * scale).rounded() }
 
-    /// App icons with their Shift+number shortcut underneath, left to right; as many as fit.
-    private func makeLauncherBar(_ launchers: [Launcher], width: CGFloat) -> NSView {
+    /// App icons with their Shift+key shortcut underneath, left to right; as many as fit.
+    private func makeLauncherBar(_ launchers: [Launcher], focused: Int?, width: CGFloat) -> NSView {
         let bar = NSStackView()
         bar.orientation = .horizontal
         bar.spacing = (4 * scale).rounded()
         bar.heightAnchor.constraint(equalToConstant: launcherHeight).isActive = true
         let fit = max(1, Int((width + bar.spacing) / (launcherCell + bar.spacing)))
+        shownLauncherCount = min(fit, launchers.count)
         for (i, launcher) in launchers.prefix(fit).enumerated() {
-            let shortcut = QuickLaunch.shortcut(i)
+            let shortcut = launcher.shortcut
             let button = LaunchButton()
             button.onClick = { [weak self] in self?.onLaunch?(i) }
             button.toolTip = shortcut.map { "\(launcher.name)  (\($0))" } ?? launcher.name
             button.wantsLayer = true
             button.layer?.cornerRadius = 7 * scale
+            button.isFocused = i == focused
 
             let icon = NSImageView(image: launcher.icon ?? NSImage())
             icon.imageScaling = .scaleProportionallyUpOrDown
@@ -473,7 +483,10 @@ final class SwitcherPanel {
         return bar
     }
 
-    private func makeHeader(query: String, stayOpen: Bool, placeholder: String) -> NSView {
+    /// `focused`: the keyboard is on the filter (Shift+Tab from the first row); it gets the same
+    /// accent ring and caret as stay-open mode.
+    private func makeHeader(query: String, stayOpen: Bool, focused: Bool, placeholder: String) -> NSView {
+        let active = stayOpen || focused
         let header = HeaderView()
         header.onClick = { [weak self] in self?.onHeaderClick?() }
         header.heightAnchor.constraint(equalToConstant: headerHeight).isActive = true
@@ -482,8 +495,8 @@ final class SwitcherPanel {
         header.wantsLayer = true
         header.layer?.cornerRadius = 7 * scale
         header.layer?.backgroundColor = NSColor.white.cgColor
-        header.layer?.borderWidth = stayOpen ? 2 : 1
-        header.layer?.borderColor = (stayOpen ? NSColor.controlAccentColor : NSColor(white: 0.75, alpha: 1)).cgColor
+        header.layer?.borderWidth = active ? 2 : 1
+        header.layer?.borderColor = (active ? NSColor.controlAccentColor : NSColor(white: 0.75, alpha: 1)).cgColor
         header.toolTip = stayOpen ? nil : "Click to keep open and type"
 
         let glass = NSImageView(image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil) ?? NSImage())
@@ -491,7 +504,7 @@ final class SwitcherPanel {
         glass.symbolConfiguration = .init(pointSize: fontSize, weight: .regular)
         let font = NSFont.systemFont(ofSize: fontSize, weight: query.isEmpty ? .regular : .medium)
         let text = NSMutableAttributedString(string: query, attributes: [.font: font, .foregroundColor: NSColor.black])
-        if stayOpen {
+        if active {
             text.append(NSAttributedString(string: "▏", attributes: [.font: font, .foregroundColor: NSColor.controlAccentColor]))
         }
         if query.isEmpty {
@@ -735,9 +748,18 @@ private final class HeaderView: NSView {
     override func mouseDown(with event: NSEvent) { onClick?() }
 }
 
-/// A quick-launch icon. Highlights on hover; a click opens the app.
+/// A quick-launch icon. Highlights on hover, and more strongly when it has keyboard focus
+/// (Shift+Tab up from the filter); a click opens the app.
 private final class LaunchButton: NSView {
     var onClick: (() -> Void)?
+    var isFocused = false { didSet { restyle(hovered: false) } }
+
+    private func restyle(hovered: Bool) {
+        layer?.backgroundColor = isFocused ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.45).cgColor
+            : hovered ? NSColor.labelColor.withAlphaComponent(0.12).cgColor : nil
+        layer?.borderWidth = isFocused ? 2 : 0
+        layer?.borderColor = NSColor.controlAccentColor.cgColor
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) { onClick?() }
@@ -748,13 +770,8 @@ private final class LaunchButton: NSView {
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
     }
 
-    override func mouseEntered(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = nil
-    }
+    override func mouseEntered(with event: NSEvent) { restyle(hovered: true) }
+    override func mouseExited(with event: NSEvent) { restyle(hovered: false) }
 }
 
 /// Pin toggle inside a row. Handles its own clicks so they don't select/switch the row.

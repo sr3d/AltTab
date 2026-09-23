@@ -1,13 +1,16 @@
 import AppKit
 
-/// An app in the quick-launch bar at the top of the switcher (Shift+1…9, 0 opens it).
-/// Stored by path, plus bundle ID so it can still be found if the app is moved.
+/// An app in the quick-launch bar at the top of the switcher (Shift+1…9, 0 opens it, or its own
+/// key). Stored by path, plus bundle ID so it can still be found if the app is moved.
 struct QuickLaunchApp: Equatable {
     let path: String
     let bundleID: String?
+    /// The user's own key for it, as a key token (see `QuickLaunch.isValidKey`): "c" for C,
+    /// "⇧c" for Shift+C. Nil uses its position in the bar (Shift+1…9, 0).
+    var key: String?
 
-    init(path: String, bundleID: String?) {
-        (self.path, self.bundleID) = (path, bundleID)
+    init(path: String, bundleID: String?, key: String? = nil) {
+        (self.path, self.bundleID, self.key) = (path, bundleID, key)
     }
 
     /// Nil unless `url` is an app bundle.
@@ -37,9 +40,34 @@ struct QuickLaunchApp: Equatable {
 }
 
 enum QuickLaunch {
-    /// Keyboard shortcut label for the nth (0-based) item: "⇧1"…"⇧9", "⇧0"; nil past the tenth.
-    static func shortcut(_ index: Int) -> String? {
-        index < 10 ? "⇧\((index + 1) % 10)" : nil
+    static let shift = "⇧"
+
+    /// Key tokens: a lowercase letter ("c", pressed on its own while the switcher is open) or a
+    /// letter or digit with Shift ("⇧c", "⇧1"). Plain digits aren't allowed: they jump to rows.
+    static func token(_ char: String, shift: Bool) -> String { (shift ? Self.shift : "") + char }
+
+    static func isValidKey(_ token: String) -> Bool {
+        let shifted = token.hasPrefix(shift)
+        let char = shifted ? String(token.dropFirst(shift.count)) : token
+        guard char.count == 1, let scalar = char.unicodeScalars.first else { return false }
+        return ("a"..."z").contains(scalar) || (shifted && ("0"..."9").contains(scalar))
+    }
+
+    /// Each app's key token, in order; nil when it has none. Apps with their own key get it;
+    /// the rest get their position's Shift+digit (1…9, 0 for the first ten), unless an app's
+    /// own key already took it.
+    static func keys(_ apps: [QuickLaunchApp]) -> [String?] {
+        let own = Set(apps.compactMap(\.key))
+        return apps.enumerated().map { i, app in
+            if let key = app.key { return key }
+            let digit = token(String((i + 1) % 10), shift: true)
+            return i < 10 && !own.contains(digit) ? digit : nil
+        }
+    }
+
+    /// How a key is shown: "C", "⇧C", "⇧1".
+    static func label(_ token: String?) -> String? {
+        token?.uppercased()
     }
 
     /// Opens (or brings forward, if running) the app.

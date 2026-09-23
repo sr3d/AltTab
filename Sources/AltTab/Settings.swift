@@ -54,13 +54,14 @@ enum Settings {
                 return QuickLaunchApp.defaults
             }
             return stored.compactMap { d in
-                d["path"].map { QuickLaunchApp(path: $0, bundleID: d["bundleID"]) }
+                d["path"].map { QuickLaunchApp(path: $0, bundleID: d["bundleID"], key: d["key"]) }
             }
         }
         set {
             defaults.set(newValue.map { app in
                 var d = ["path": app.path]
                 if let id = app.bundleID { d["bundleID"] = id }
+                if let key = app.key { d["key"] = key }
                 return d
             }, forKey: "quickLaunchApps")
         }

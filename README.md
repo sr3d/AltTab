@@ -33,7 +33,7 @@ Turn on **Launch at Login** from the menu-bar menu or Preferences.
 - **Focus history:** the list is ordered by the windows you actually used most recently, not by stacking order. It stays correct after a Cmd+Tab brings a whole app forward.
 - **Pins:** keep favourite windows at the top. Drag to reorder them.
 - **Number keys:** press 1–9 or 0 to jump straight to a row. Pinned windows get the first numbers.
-- **Quick Launch:** keep the apps you use all the time (Finder, Slack, Activity Monitor…) as icons at the top of the switcher, and open one with Shift+1–9, 0.
+- **Quick Launch:** keep the apps you use all the time (Finder, Slack, Activity Monitor…) as icons at the top of the switcher, and open one with Shift+1–9, 0 or a key you pick: Cmd+Tab, then C for Calendar.
 - **Quick filter:** start typing to narrow the list by window title or app name.
 - **Keyboard or mouse:** arrow keys, Tab/Shift+Tab, hover, the scroll wheel and clicks all work. Long lists get a scrollbar you can drag.
 - **Adjustable size:** set the font size in Preferences; the whole panel scales with it.
@@ -59,7 +59,8 @@ While the list is open:
 |---|---|
 | Tab / → / ↓ · Shift+Tab / ← / ↑ | move the selection |
 | 1–9, 0 | jump straight to that row |
-| Shift+1–9, 0 or click an icon in the top bar | open that Quick Launch app |
+| Shift+1–9, 0, the app's own key (e.g. C) or click an icon in the top bar | open that Quick Launch app |
+| Shift+Tab / ↑ on the first row | move to the filter bar; again to the Quick Launch icons (Return opens the one selected) |
 | `=` or click 📌 | pin / unpin the window |
 | drag a pinned row | reorder pins |
 | `` ` `` or click the filter bar | keep the list open after releasing Option |
@@ -87,7 +88,7 @@ Menu bar → **AltTab → Preferences…** (⌘,) or **About AltTab**
 - **Use AltTab for Cmd+Tab:** Cmd+Tab (and Cmd+Shift+Tab) open AltTab. Choose what it shows: **Windows** (default, the same list as Option+Tab) or **Apps** (running apps, ordered by most recent use). For Apps, pick the layout: a **List** (default) or **Icons**, a horizontal strip of app icons like the macOS switcher. Also choose whether switching to an app brings **all of its windows** forward (like macOS) or **only its most recent window**. To hear Cmd+Tab, AltTab turns off the macOS switcher while it runs. It turns it back on when AltTab quits, is killed, or crashes, and again on the next launch.
 - **Show switcher on all displays:** on (default) shows the panel on every connected screen, and you can use any of them. Off shows it only on the screen with the mouse pointer.
 - **Launch at login.**
-- **Quick Launch tab:** the apps in the bar at the top of the switcher (Finder and Activity Monitor to start with). Add with **+** or by dragging apps in from Finder, remove with **−** or Delete, drag to reorder. The first ten get Shift+1–9, 0.
+- **Quick Launch tab:** the apps in the bar at the top of the switcher (Finder and Activity Monitor to start with). Add with **+** or by dragging apps in from Finder, remove with **−** or Delete, drag to reorder. The first ten get Shift+1–9, 0. Click an app's shortcut and press a key to give it its own: a letter (C for Calendar, Z for Zoom), or hold Shift for Shift+a letter or digit (⇧S for Slack). C and ⇧C are separate keys, so they can open different apps. Delete puts it back. A letter key opens its app only as the first key after Cmd+Tab/Option+Tab; once you're typing a filter (or after Shift+Tab to the filter bar, or in keep-open mode) letters type as usual, and so does a letter no app uses.
 
 ## Build from source
 Requires macOS 13+ and Swift 5.9+. The Command Line Tools are enough; Xcode is only needed for universal (arm64 + x86_64) builds.
