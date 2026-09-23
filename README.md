@@ -12,7 +12,7 @@
 Cmd+Tab activates a whole app, so every window of that app jumps forward and buries what you were looking at. **Option+Tab** brings back just the one window you were in before. Hold Option to pick any window from a list that you can pin, number and filter.
 
 <p align="center">
-  <a href="https://github.com/sr3d/AltTab/releases/download/v0.1.1/AltTab-0.1.1.dmg"><img src="https://img.shields.io/github/v/release/sr3d/AltTab?style=for-the-badge&logo=apple&label=Download%20for%20macOS&color=2ea44f" height="48" alt="Download AltTab for macOS"></a><br>
+  <a href="https://github.com/sr3d/AltTab/releases/download/v0.2.0/AltTab-0.2.0.dmg"><img src="https://img.shields.io/github/v/release/sr3d/AltTab?style=for-the-badge&logo=apple&label=Download%20for%20macOS&color=2ea44f" height="48" alt="Download AltTab for macOS"></a><br>
   <sub>macOS 13 or later · Apple Silicon and Intel · <a href="#install">install steps</a> · <a href="https://github.com/sr3d/AltTab/releases">all releases</a></sub>
 </p>
 
