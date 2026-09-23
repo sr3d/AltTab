@@ -46,6 +46,22 @@ enum Settings {
         set { defaults.set(newValue, forKey: "appSwitchBringsAllWindows") }
     }
 
+    /// Apps in the quick-launch bar, in order.
+    static var quickLaunchApps: [QuickLaunchApp] {
+        get {
+            (defaults.array(forKey: "quickLaunchApps") as? [[String: String]] ?? []).compactMap { d in
+                d["path"].map { QuickLaunchApp(path: $0, bundleID: d["bundleID"]) }
+            }
+        }
+        set {
+            defaults.set(newValue.map { app in
+                var d = ["path": app.path]
+                if let id = app.bundleID { d["bundleID"] = id }
+                return d
+            }, forKey: "quickLaunchApps")
+        }
+    }
+
     /// Show the switcher on every display, or only on the one under the mouse.
     static var showOnAllScreens: Bool {
         get { showOnAllScreensOverride ?? defaults.object(forKey: "showOnAllScreens") as? Bool ?? true }

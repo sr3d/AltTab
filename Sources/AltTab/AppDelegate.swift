@@ -55,6 +55,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func activate() {
         tracker.start()
+        // After the app icon cache warms (queued by tracker.start), so the warm-up uses it.
+        DispatchQueue.main.async { [weak self] in
+            QuickLaunch.warm()
+            self?.switcher.warmUp()
+        }
+        // New displays get new panels; set those up too.
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.switcher.warmUp()
+        }
         let ok = tap.install()
         if !ok { NSLog("AltTab: failed to create event tap") }
         updateStatus(trusted: ok)

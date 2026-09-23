@@ -1,10 +1,11 @@
 import AppKit
 import ServiceManagement
 
-/// Preferences: a General tab (font size, Cmd+Tab takeover, all displays, launch at login) and an About tab.
+/// Preferences: a General tab (font size, Cmd+Tab takeover, all displays, launch at login),
+/// a Quick Launch tab (apps in the bar at the top of the switcher) and an About tab.
 /// Changes are saved immediately; `onChange` lets the app apply them (e.g. the Cmd+Tab hotkey).
 final class PreferencesWindow: NSWindowController {
-    enum Tab: Int { case general, about }
+    enum Tab: Int { case general, quickLaunch, about }
 
     static let repoURL = URL(string: "https://github.com/sr3d/AltTab")!
 
@@ -26,6 +27,7 @@ final class PreferencesWindow: NSWindowController {
     private let loginBox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
     private let allScreensBox = NSButton(checkboxWithTitle: "Show switcher on all displays", target: nil, action: nil)
     private let contentWidth: CGFloat = 440
+    private let quickLaunchEditor = QuickLaunchEditor()
 
     init() {
         let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: true)
@@ -34,6 +36,7 @@ final class PreferencesWindow: NSWindowController {
         // Toolbar-style tabs, like system Settings panes; the window resizes to each tab.
         tabs.tabStyle = .toolbar
         tabs.addTabViewItem(item("General", symbol: "gearshape", generalView()))
+        tabs.addTabViewItem(item("Quick Launch", symbol: "square.grid.2x2", quickLaunchView()))
         tabs.addTabViewItem(item("About", symbol: "info.circle", aboutView()))
         window.contentViewController = tabs
         window.title = "AltTab Preferences"
@@ -187,6 +190,19 @@ final class PreferencesWindow: NSWindowController {
         bringLabel.textColor = takeover && apps ? .labelColor : .disabledControlTextColor
         allScreensBox.state = Settings.showOnAllScreens ? .on : .off
         loginBox.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    }
+
+    // MARK: Quick Launch
+
+    private func quickLaunchView() -> NSView {
+        let title = sectionTitle("Quick Launch")
+        let hint = note("Apps you use all the time, shown as icons at the top of the switcher. While the switcher is open, press Shift+1…9, 0 to open one, or click its icon. Add apps with + or by dragging them here from Finder; drag to reorder.")
+        let stack = NSStackView(views: [title, hint, quickLaunchEditor.makeView(width: contentWidth)])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.setCustomSpacing(12, after: hint)
+        return padded(stack)
     }
 
     // MARK: About

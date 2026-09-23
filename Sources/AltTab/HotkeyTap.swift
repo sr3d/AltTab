@@ -10,6 +10,7 @@ final class HotkeyTap {
     enum Action {
         case start(SwitcherMode, reverse: Bool), next, previous
         case jump(Int)                 // 1-based row number
+        case launch(Int)               // Shift+number: 1-based quick-launch item
         case togglePin, stayOpen, confirm, escape
         case type(String), deleteBackward
         case commit                    // trigger modifier released while held
@@ -123,7 +124,9 @@ final class HotkeyTap {
         default: break
         }
         if let arrow = Self.arrowKeys[key] { return arrow }
-        if let digit = Self.digitKeys[key] { return .jump(digit) }
+        if let digit = Self.digitKeys[key] {
+            return event.flags.contains(.maskShift) ? .launch(digit) : .jump(digit)
+        }
         // Read the character without modifiers so Option+T filters by "t", not "†".
         guard let chars = NSEvent(cgEvent: event)?.charactersIgnoringModifiers?.lowercased(),
               let scalar = chars.unicodeScalars.first,

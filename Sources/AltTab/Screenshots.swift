@@ -33,7 +33,7 @@ enum Screenshots {
         }
 
         shoot("switcher.png") {
-            panel.show(rows(indexed), selected: 3, query: "", stayOpen: false)
+            panel.show(rows(indexed), selected: 3, query: "", stayOpen: false, launchers: demoLaunchers())
             return panelWindow(panel)
         }
         shoot("filter.png") {
@@ -70,6 +70,10 @@ enum Screenshots {
             prefs.show(.general)
             return prefs.window
         }
+        shoot("quick-launch.png") {
+            prefs.show(.quickLaunch)
+            return prefs.window
+        }
         shoot("about.png") {
             prefs.show(.about)
             return prefs.window
@@ -102,6 +106,9 @@ enum Screenshots {
             ("/System/Applications/Calendar.app", "Calendar", "Calendar"),
             ("/System/Applications/Messages.app", "Messages", "Messages"),
             ("/System/Applications/Music.app", "Music", "Music"),
+            ("/System/Applications/Preview.app", "Preview", "diagram.png"),
+            ("/System/Applications/Utilities/Activity Monitor.app", "Activity Monitor", "Activity Monitor"),
+            ("/System/Applications/System Settings.app", "System Settings", "Displays"),
         ]
         // App icons can arrive as a placeholder that fills in asynchronously; ask once, let
         // them load, then ask again.
@@ -109,6 +116,21 @@ enum Screenshots {
         settle(2)
         return items.enumerated().map { i, item in
             WindowInfo(id: CGWindowID(1000 + i), pid: 0, element: nil, title: item.2, appName: item.1, icon: icon(item.0))
+        }
+    }
+
+    /// Quick-launch bar items for the main screenshot.
+    private static func demoLaunchers() -> [SwitcherPanel.Launcher] {
+        [
+            "/System/Library/CoreServices/Finder.app",
+            "/Applications/Safari.app",
+            "/System/Applications/Utilities/Terminal.app",
+            "/System/Applications/Utilities/Activity Monitor.app",
+            "/System/Applications/Notes.app",
+            "/System/Applications/Calendar.app",
+        ].filter { FileManager.default.fileExists(atPath: $0) }.map { path in
+            let name = FileManager.default.displayName(atPath: path)
+            return .init(name: name.hasSuffix(".app") ? String(name.dropLast(4)) : name, icon: NSWorkspace.shared.icon(forFile: path))
         }
     }
 

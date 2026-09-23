@@ -24,6 +24,8 @@ final class Switcher {
         get { mode == .windows ? windowPins : appPins }
         set { if mode == .windows { windowPins = newValue } else { appPins = newValue } }
     }
+    private var launchers: [QuickLaunchApp] = [] // quick-launch bar, read at start
+    private var launcherItems: [SwitcherPanel.Launcher] = []
     private var showTimer: Timer?
     private var outsideClickMonitor: Any?
     /// Long enough that a quick tap doesn't flash the panel. The panel is built right away and
@@ -60,6 +62,7 @@ final class Switcher {
             render()
         }
         panel.onScroll = { [weak self] in self?.move($0) }
+        panel.onLaunch = { [weak self] in self?.launch($0) }
         panel.onMovePin = { [weak self] from, to in
             guard let self, visible.indices.contains(from), visible.indices.contains(to) else { return }
             movePin(visible[from].id, to: visible[to].id)
@@ -86,6 +89,8 @@ final class Switcher {
         case .previous: move(-1)
         case .jump(let n):
             if visible.indices.contains(n - 1) { finish(focusing: visible[n - 1]) }
+        case .launch(let n):
+            launch(n - 1)
         case .togglePin:
             if let id = selectedID { togglePin(id) }
         case .stayOpen:
@@ -133,6 +138,8 @@ final class Switcher {
         // Normally all[0] is the item you're in, so "previous" is all[1]. If the front app has
         // no listed window (e.g. Finder with none open), all[0] is already the previous one.
         let previous = all[0].id == current ? min(1, all.count - 1) : 0
+        launchers = Settings.quickLaunchApps
+        launcherItems = launchers.map { .init(name: $0.name, icon: $0.icon) }
         query = ""
         applyFilter(selectFirst: false)
         // Pins are listed first, so pick the start window by MRU position, then find it.
@@ -162,6 +169,24 @@ final class Switcher {
         debugLog(String(format: "timing reveal %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
     }
 
+    /// Builds the panel once from the current windows, invisibly, and throws it away, so the
+    /// first real opening doesn't pay for one-time setup (fonts, view classes, window-server
+    /// windows): measured ~73 ms -> ~27 ms for that first build on 3 displays.
+    func warmUp() {
+        guard !isOpen else { return }
+        let t0 = CFAbsoluteTimeGetCurrent()
+        let windows = WindowList.order(WindowList.build(WindowList.onScreen(), snapshots: tracker.snapshots), mru: tracker.mru)
+        let rows = windows.enumerated().map { i, w in
+            SwitcherPanel.Row(window: w, number: i < 10 ? String((i + 1) % 10) : nil, isPinned: false)
+        }
+        let launchers = Settings.quickLaunchApps.map { SwitcherPanel.Launcher(name: $0.name, icon: $0.icon) }
+        panel.show(rows, selected: rows.isEmpty ? nil : 0, query: "", stayOpen: false,
+                   placeholder: "Type to filter windows", visible: false, launchers: launchers)
+        panel.prime()
+        panel.hide()
+        debugLog(String(format: "timing warmUp %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+    }
+
     /// Regular apps (Dock apps) by most-recent activation, like the macOS Cmd+Tab list.
     private func runningApps(screen: [ScreenWindow]) -> [WindowInfo] {
         let myPid = ProcessInfo.processInfo.processIdentifier
@@ -175,6 +200,14 @@ final class Switcher {
             let subtitle = app.isHidden ? "hidden" : count == 0 ? name : count == 1 ? "1 window" : "\(count) windows"
             return WindowInfo(id: CGWindowID(pid), pid: pid, element: nil, title: name, appName: subtitle, icon: AppIcons.icon(for: app))
         }
+    }
+
+    /// Closes the switcher and opens the quick-launch app at `index` (0-based).
+    private func launch(_ index: Int) {
+        guard launchers.indices.contains(index) else { return }
+        let app = launchers[index]
+        finish(focusing: nil)
+        QuickLaunch.open(app)
     }
 
     private var selectedIndex: Int? {
@@ -242,7 +275,8 @@ final class Switcher {
         }
         panel.show(rows, selected: selectedIndex, query: query, stayOpen: stayOpen,
                    placeholder: mode == .windows ? "Type to filter windows" : "Type to filter apps",
-                   layout: mode == .apps ? Settings.appSwitcherLayout : .list, visible: !offscreen)
+                   layout: mode == .apps ? Settings.appSwitcherLayout : .list, visible: !offscreen,
+                   launchers: launcherItems)
     }
 
     /// Single exit path: hides everything, resets per-session state, returns the hotkey to idle.
