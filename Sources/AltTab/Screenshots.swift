@@ -10,6 +10,8 @@ enum Screenshots {
         let out = URL(fileURLWithPath: outputDirectory, isDirectory: true)
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         let backdrop = Backdrop()
+        // One panel per shot, whatever the user's all-displays preference is.
+        Settings.showOnAllScreensOverride = false
         let panel = SwitcherPanel()
         let demo = demoWindows()
         let pinned: Set<Int> = [0, 1]
@@ -46,9 +48,30 @@ enum Screenshots {
             return panelWindow(panel)
         }
         panel.hide()
+        shoot("apps.png") {
+            let apps = demoApps()
+            panel.show(apps.enumerated().map { i, w in .init(window: w, number: String(i + 1), isPinned: i == 0) },
+                       selected: 1, query: "", stayOpen: false, placeholder: "Type to filter apps")
+            return panelWindow(panel)
+        }
+        panel.hide()
+        shoot("apps-icons.png") {
+            let apps = demoApps()
+            panel.show(apps.enumerated().map { i, w in .init(window: w, number: String(i + 1), isPinned: i == 0) },
+                       selected: 1, query: "", stayOpen: false, placeholder: "Type to filter apps", layout: .icons)
+            return panelWindow(panel)
+        }
+        panel.hide()
+        Settings.showOnAllScreensOverride = nil // Preferences shows the real setting
+        // Unbundled runs have no app icon; use the repo's for the About tab.
+        if let icon = NSImage(contentsOfFile: "Resources/AppIcon.png") { NSApp.applicationIconImage = icon }
+        let prefs = PreferencesWindow()
         shoot("preferences.png") {
-            let prefs = PreferencesWindow()
-            prefs.show()
+            prefs.show(.general)
+            return prefs.window
+        }
+        shoot("about.png") {
+            prefs.show(.about)
             return prefs.window
         }
         backdrop.orderOut(nil)
@@ -86,6 +109,23 @@ enum Screenshots {
         settle(2)
         return items.enumerated().map { i, item in
             WindowInfo(id: CGWindowID(1000 + i), pid: 0, element: nil, title: item.2, appName: item.1, icon: icon(item.0))
+        }
+    }
+
+    private static func demoApps() -> [WindowInfo] {
+        let items: [(String, String, String)] = [
+            ("/Applications/Sublime Text.app", "Sublime Text", "12 windows"),
+            ("/System/Applications/Utilities/Terminal.app", "Terminal", "3 windows"),
+            ("/Applications/Safari.app", "Safari", "2 windows"),
+            ("/System/Library/CoreServices/Finder.app", "Finder", "1 window"),
+            ("/System/Applications/Mail.app", "Mail", "1 window"),
+            ("/System/Applications/Music.app", "Music", "Music"),
+        ].filter { FileManager.default.fileExists(atPath: $0.0) }
+        items.forEach { _ = NSWorkspace.shared.icon(forFile: $0.0) }
+        settle(1)
+        return items.enumerated().map { i, item in
+            WindowInfo(id: CGWindowID(2000 + i), pid: 0, element: nil, title: item.1, appName: item.2,
+                       icon: NSWorkspace.shared.icon(forFile: item.0))
         }
     }
 

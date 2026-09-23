@@ -23,6 +23,8 @@ enum SkyLight {
 
     /// kCPSUserGenerated: front the process + only the given window, as a user-initiated switch.
     static let userGenerated: UInt32 = 0x200
+    /// kCPSAllWindows: bring every window of the process forward (what Cmd+Tab does).
+    static let allWindows: UInt32 = 0x100
 
     private static let handle = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY)
 

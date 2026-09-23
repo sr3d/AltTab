@@ -1,21 +1,34 @@
 import AltTabCore
 import AppKit
 
-/// Ties the hotkey to the window list, panel and focuser.
-/// Quick tap focuses the previous window; holding Option shows the panel after a short delay.
+/// What the switcher lists: windows (Option+Tab) or running apps (Cmd+Tab, when enabled).
+enum SwitcherMode: String { case windows, apps }
+
+/// Ties the hotkey to the window/app list, panel and focuser.
+/// Quick tap switches to the previous item; holding the modifier shows the panel after a short delay.
 /// While open: pins sit at the top, rows are numbered 1-9, 0 for direct jumps, typing filters.
 final class Switcher {
     private let tracker: WindowTracker
     private let panel = SwitcherPanel()
+    private var mode = SwitcherMode.windows
+    // In app mode each row is a WindowInfo whose `id` is the app's pid and whose `appName`
+    // holds a window-count subtitle, so the list, pins and panel code are shared.
     private var all: [WindowInfo] = []        // MRU order for this session
     private var visible: [WindowInfo] = []    // pinned first, then the rest, filtered
     private var selectedID: CGWindowID?       // by ID so pinning/filtering keeps the selection
     private var query = ""
     private var stayOpen = false
-    private var pinned: [CGWindowID] = []     // session-lifetime, in pin order
+    private var windowPins: [CGWindowID] = [] // session-lifetime, in pin order
+    private var appPins: [CGWindowID] = []
+    private var pinned: [CGWindowID] {
+        get { mode == .windows ? windowPins : appPins }
+        set { if mode == .windows { windowPins = newValue } else { appPins = newValue } }
+    }
     private var showTimer: Timer?
     private var outsideClickMonitor: Any?
-    private let showDelay: TimeInterval = 0.15
+    /// Long enough that a quick tap doesn't flash the panel. The panel is built right away and
+    /// only revealed when this runs out, so it appears as soon as the delay ends.
+    private let showDelay: TimeInterval = 0.05
     /// Called whenever the switcher finishes so the hotkey returns to idle.
     var onDismiss: (() -> Void)?
     /// Called when the panel switches to stay-open mode on its own (mouse use), so the
@@ -56,14 +69,19 @@ final class Switcher {
     private var isOpen: Bool { !all.isEmpty }
 
     func handle(_ action: HotkeyTap.Action) {
-        if case .start(let reverse) = action { return start(reverse: reverse) }
+        if case .start(let mode, let reverse) = action { return start(mode, reverse: reverse) }
+        if case .prepare = action {
+            let t0 = CFAbsoluteTimeGetCurrent()
+            WindowList.prefetch()
+            return debugLog(String(format: "timing prepare %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+        }
         guard isOpen else {
             // Nothing to show (e.g. no windows); make sure the hotkey doesn't stay engaged.
             onDismiss?()
             return
         }
         switch action {
-        case .start: break
+        case .start, .prepare: break
         case .next: move(+1)
         case .previous: move(-1)
         case .jump(let n):
@@ -94,28 +112,69 @@ final class Switcher {
         }
     }
 
-    private func start(reverse: Bool) {
+    private func start(_ mode: SwitcherMode, reverse: Bool) {
+        let t0 = CFAbsoluteTimeGetCurrent()
+        self.mode = mode
         let screen = WindowList.onScreen()
-        all = WindowList.order(WindowList.build(screen, snapshots: tracker.snapshots), mru: tracker.mru)
+        let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let current: CGWindowID?
+        switch mode {
+        case .windows:
+            all = WindowList.order(WindowList.build(screen, snapshots: tracker.snapshots), mru: tracker.mru)
+            current = screen.first { $0.pid == frontPid }?.id
+        case .apps:
+            all = runningApps(screen: screen)
+            current = frontPid.map { CGWindowID($0) }
+        }
         guard !all.isEmpty else {
             onDismiss?()
             return
         }
-        // Normally all[0] is the window you're in, so "previous" is all[1]. If the front app
-        // has no listed window (e.g. Finder with none open), all[0] is already the previous one.
-        let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        let current = screen.first { $0.pid == frontPid }?.id
+        // Normally all[0] is the item you're in, so "previous" is all[1]. If the front app has
+        // no listed window (e.g. Finder with none open), all[0] is already the previous one.
         let previous = all[0].id == current ? min(1, all.count - 1) : 0
         query = ""
         applyFilter(selectFirst: false)
         // Pins are listed first, so pick the start window by MRU position, then find it.
         selectedID = reverse ? visible.last?.id : all[previous].id
-        debugLog("start current=\(current ?? 0) selected=\(selectedID ?? 0) list=" + visible.prefix(5).map { "\($0.appName)#\($0.id)" }.joined(separator: ", ") + " pinned=\(pinned)")
+        debugLog(String(format: "timing start %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+        debugLog("start \(mode) current=\(current ?? 0) selected=\(selectedID ?? 0) list=" + visible.prefix(5).map { "\($0.appName)#\($0.id)" }.joined(separator: ", ") + " pinned=\(pinned)")
         // Cache misses (new apps/windows) show app name only; fill them in for next time.
-        for pid in Set(all.filter { $0.element == nil }.map(\.pid)) { tracker.refresh(pid) }
-        let timer = Timer(timeInterval: showDelay, repeats: false) { [weak self] _ in self?.render() }
+        if mode == .windows {
+            for pid in Set(all.filter { $0.element == nil }.map(\.pid)) { tracker.refresh(pid) }
+        }
+        let timer = Timer(timeInterval: showDelay, repeats: false) { [weak self] _ in self?.reveal() }
         RunLoop.main.add(timer, forMode: .common) // also fire while a menu is tracking
         showTimer = timer
+        // Build the panel off-screen during the delay, after any already-queued keys (a quick
+        // tap's release should switch without waiting on the build).
+        DispatchQueue.main.async { [weak self] in
+            guard let self, isOpen, showTimer != nil else { return }
+            render(offscreen: true)
+        }
+    }
+
+    /// Delay over: show the panel built during it (or build it now if that hasn't run yet).
+    private func reveal() {
+        showTimer = nil
+        let t0 = CFAbsoluteTimeGetCurrent()
+        if !panel.reveal() { render() }
+        debugLog(String(format: "timing reveal %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
+    }
+
+    /// Regular apps (Dock apps) by most-recent activation, like the macOS Cmd+Tab list.
+    private func runningApps(screen: [ScreenWindow]) -> [WindowInfo] {
+        let myPid = ProcessInfo.processInfo.processIdentifier
+        let apps = WindowList.runningApps.filter { $0.activationPolicy == .regular && $0.processIdentifier != myPid }
+        let rank = Dictionary(tracker.appMRU.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        let counts = Dictionary(grouping: screen, by: \.pid).mapValues(\.count)
+        return apps.sorted { (rank[$0.processIdentifier] ?? .max) < (rank[$1.processIdentifier] ?? .max) }.map { app in
+            let pid = app.processIdentifier
+            let name = app.localizedName ?? "?"
+            let count = counts[pid] ?? 0
+            let subtitle = app.isHidden ? "hidden" : count == 0 ? name : count == 1 ? "1 window" : "\(count) windows"
+            return WindowInfo(id: CGWindowID(pid), pid: pid, element: nil, title: name, appName: subtitle, icon: AppIcons.icon(for: app))
+        }
     }
 
     private var selectedIndex: Int? {
@@ -168,14 +227,22 @@ final class Switcher {
         render()
     }
 
-    private func render() {
-        showTimer?.invalidate()
-        showTimer = nil
+    /// Rebuilds the panel. `offscreen` prepares it for `reveal()`; any other render (selection
+    /// moved, typing) shows it immediately.
+    private func render(offscreen: Bool = false) {
+        let t0 = CFAbsoluteTimeGetCurrent()
+        defer { debugLog(String(format: "timing render %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)) }
+        if !offscreen {
+            showTimer?.invalidate()
+            showTimer = nil
+        }
         let pinnedSet = Set(pinned)
         let rows = visible.enumerated().map { i, w in
             SwitcherPanel.Row(window: w, number: i < 10 ? String((i + 1) % 10) : nil, isPinned: pinnedSet.contains(w.id))
         }
-        panel.show(rows, selected: selectedIndex, query: query, stayOpen: stayOpen)
+        panel.show(rows, selected: selectedIndex, query: query, stayOpen: stayOpen,
+                   placeholder: mode == .windows ? "Type to filter windows" : "Type to filter apps",
+                   layout: mode == .apps ? Settings.appSwitcherLayout : .list, visible: !offscreen)
     }
 
     /// Single exit path: hides everything, resets per-session state, returns the hotkey to idle.
@@ -191,9 +258,18 @@ final class Switcher {
         query = ""
         stayOpen = false
         onDismiss?()
-        if let target {
+        guard let target else { return }
+        switch mode {
+        case .windows:
             tracker.touch(target.id)
             WindowFocuser.focus(target)
+        case .apps:
+            tracker.touchApp(target.pid)
+            // The app's most recent window on this Space, if any, becomes the key window.
+            let windows = WindowList.order(WindowList.build(WindowList.onScreen(), snapshots: tracker.snapshots), mru: tracker.mru)
+            let recent = windows.first { $0.pid == target.pid }
+            if let recent { tracker.touch(recent.id) }
+            WindowFocuser.activateApp(pid: target.pid, allWindows: Settings.appSwitchBringsAllWindows, window: recent)
         }
     }
 }

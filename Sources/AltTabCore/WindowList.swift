@@ -49,21 +49,37 @@ public enum WindowList {
         }
     }
 
+    /// Running apps by pid. Walking `runningApplications` costs ~20 ms after the app has been
+    /// idle (it re-syncs with the system), so `prefetch()` does it when the modifier goes down,
+    /// ahead of Tab. Main thread only.
+    private static var appsByPid: [pid_t: NSRunningApplication] = [:]
+
+    public static func prefetch() {
+        appsByPid = Dictionary(NSWorkspace.shared.runningApplications.map { ($0.processIdentifier, $0) },
+                               uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Running apps as of the last `prefetch()` (the modifier press that opened the switcher).
+    public static var runningApps: [NSRunningApplication] {
+        if appsByPid.isEmpty { prefetch() }
+        return Array(appsByPid.values)
+    }
+
     /// Combines on-screen windows with cached AX snapshots. Windows whose app has no snapshot
     /// yet (or that are newer than it) are included with the app name as title.
     public static func build(_ screen: [ScreenWindow], snapshots: [pid_t: AXSnapshot]) -> [WindowInfo] {
-        var apps: [pid_t: NSRunningApplication?] = [:]
+        if appsByPid.isEmpty { prefetch() }
+        let apps = appsByPid
         return screen.compactMap { w in
             let snap = snapshots[w.pid]
             if snap?.rejected.contains(w.id) == true { return nil }
             let app = apps[w.pid] ?? NSRunningApplication(processIdentifier: w.pid)
-            apps[w.pid] = app
             guard app?.activationPolicy != .prohibited else { return nil }
             let appName = app?.localizedName ?? w.ownerName
             let ax = snap?.windows[w.id]
             let title = ax?.title ?? ""
             return WindowInfo(id: w.id, pid: w.pid, element: ax?.element,
-                              title: title.isEmpty ? appName : title, appName: appName, icon: app?.icon)
+                              title: title.isEmpty ? appName : title, appName: appName, icon: app.flatMap(AppIcons.icon(for:)))
         }
     }
 

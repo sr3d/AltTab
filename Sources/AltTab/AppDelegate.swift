@@ -22,10 +22,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let prefsItem = NSMenuItem(title: "Preferences…", action: #selector(showPreferences), keyEquivalent: ",")
         prefsItem.target = self
         menu.addItem(prefsItem)
+        let aboutItem = NSMenuItem(title: "About AltTab", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit AltTab", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         menu.delegate = self
         statusItem.menu = menu
+
+        // Restore the macOS Cmd+Tab if a previous run was killed while it was taken over;
+        // it's re-disabled in activate() once the event tap is running.
+        NativeCommandTab.setEnabled(true)
+        NativeCommandTab.installRestoreHandlers()
+        preferences.onChange = { [weak self] in self?.applyCommandTabSetting() }
 
         tap.onAction = { [weak self] in self?.switcher.handle($0) }
         switcher.onDismiss = { [weak self] in self?.tap.deactivate() }
@@ -49,6 +58,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ok = tap.install()
         if !ok { NSLog("AltTab: failed to create event tap") }
         updateStatus(trusted: ok)
+        applyCommandTabSetting()
+    }
+
+    /// Hands Cmd+Tab to AltTab (or back to macOS). Only takes it when our tap is running,
+    /// so Cmd+Tab never ends up handled by nobody.
+    private func applyCommandTabSetting() {
+        let takeover = Settings.commandTabTakeover && tap.isInstalled
+        tap.commandTabMode = takeover ? Settings.commandTabMode : nil
+        NativeCommandTab.setEnabled(!takeover)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        NativeCommandTab.setEnabled(true)
     }
 
     private func updateStatus(trusted: Bool) {
@@ -61,7 +83,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showPreferences() {
-        preferences.show()
+        preferences.show(.general)
+    }
+
+    @objc private func showAbout() {
+        preferences.show(.about)
     }
 
     @objc private func toggleLaunchAtLogin() {

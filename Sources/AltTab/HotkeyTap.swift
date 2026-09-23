@@ -1,23 +1,31 @@
 import AppKit
 import CoreGraphics
 
-/// Session event tap for Option+Tab and the keys used while the switcher is open.
+/// Session event tap for Option+Tab (windows), optionally Cmd+Tab (windows or apps), and the keys used
+/// while the switcher is open.
 /// While active, every key without Cmd is swallowed so nothing leaks into the front app.
 /// The swallow decision is made inline, but actions are dispatched async so the
 /// WindowServer never waits on our work (a slow tap stalls all input and gets disabled).
 final class HotkeyTap {
     enum Action {
-        case start(reverse: Bool), next, previous
+        case start(SwitcherMode, reverse: Bool), next, previous
         case jump(Int)                 // 1-based row number
         case togglePin, stayOpen, confirm, escape
         case type(String), deleteBackward
-        case commit                    // Option released while held
+        case commit                    // trigger modifier released while held
+        case prepare                   // a trigger modifier went down: warm caches before Tab
     }
 
     enum Mode { case idle, held, stayOpen }
 
     var onAction: ((Action) -> Void)?
+    /// What Cmd+Tab opens; nil leaves Cmd+Tab alone. The native switcher must be disabled
+    /// separately (NativeCommandTab) or the Dock swallows Cmd+Tab before this tap sees it.
+    var commandTabMode: SwitcherMode?
     private(set) var mode = Mode.idle
+    var isInstalled: Bool { tap != nil }
+    /// The modifier that opened the switcher; releasing it commits (in `.held` mode).
+    private var trigger: CGEventFlags = .maskAlternate
     private var tap: CFMachPort?
 
     private enum Key {
@@ -58,9 +66,15 @@ final class HotkeyTap {
             return Unmanaged.passUnretained(event)
 
         case .flagsChanged:
-            if mode == .held && !event.flags.contains(.maskAlternate) {
+            if mode == .held && !event.flags.contains(trigger) {
                 mode = .idle
                 send(.commit)
+            } else if mode == .idle {
+                // Option (or a taken-over Cmd) usually goes down well before Tab; use that gap.
+                let key = event.getIntegerValueField(.keyboardEventKeycode)
+                let optionDown = (key == 58 || key == 61) && event.flags.contains(.maskAlternate)
+                let commandDown = (key == 55 || key == 54) && event.flags.contains(.maskCommand) && commandTabMode != nil
+                if optionDown || commandDown { send(.prepare) }
             }
             return Unmanaged.passUnretained(event)
 
@@ -68,17 +82,25 @@ final class HotkeyTap {
             let key = event.getIntegerValueField(.keyboardEventKeycode)
             let flags = event.flags
             if mode == .idle {
-                guard key == Key.tab && flags.contains(.maskAlternate)
-                        && !flags.contains(.maskCommand) && !flags.contains(.maskControl) else {
+                guard key == Key.tab, !flags.contains(.maskControl) else { return Unmanaged.passUnretained(event) }
+                let option = flags.contains(.maskAlternate), command = flags.contains(.maskCommand)
+                let start: (SwitcherMode, CGEventFlags)
+                if option && !command {
+                    start = (.windows, .maskAlternate)
+                } else if command && !option, let commandTabMode {
+                    start = (commandTabMode, .maskCommand)
+                } else {
                     return Unmanaged.passUnretained(event)
                 }
                 if type == .keyDown {
                     mode = .held
-                    send(.start(reverse: flags.contains(.maskShift)))
+                    trigger = start.1
+                    send(.start(start.0, reverse: flags.contains(.maskShift)))
                 }
                 return nil
             }
-            if flags.contains(.maskCommand) { return Unmanaged.passUnretained(event) }
+            // Cmd shortcuts pass through, except when Cmd+Tab opened the switcher (Cmd is the held key).
+            if flags.contains(.maskCommand) && trigger != .maskCommand { return Unmanaged.passUnretained(event) }
             if type == .keyDown, let action = action(for: key, event) {
                 if case .stayOpen = action { mode = .stayOpen }
                 send(action)

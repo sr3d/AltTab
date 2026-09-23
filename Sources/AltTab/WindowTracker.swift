@@ -12,6 +12,8 @@ import os
 final class WindowTracker {
     private(set) var mru: [CGWindowID] = []
     private(set) var snapshots: [pid_t: AXSnapshot] = [:]
+    /// Apps by most-recent activation (for the Cmd+Tab app switcher).
+    private(set) var appMRU: [pid_t] = []
 
     private var observers: [pid_t: AXObserver] = [:]
     private var observing: Set<pid_t> = []
@@ -22,16 +24,26 @@ final class WindowTracker {
     private let myPid = ProcessInfo.processInfo.processIdentifier
 
     func start() {
-        mru = WindowList.onScreen().map(\.id)
+        let screen = WindowList.onScreen()
+        mru = screen.map(\.id)
         let ws = NSWorkspace.shared
+        // Seed app order: frontmost, then by window stacking, then everything else.
+        var seed: [pid_t] = ws.frontmostApplication.map { [$0.processIdentifier] } ?? []
+        for pid in screen.map(\.pid) + ws.runningApplications.map(\.processIdentifier) where !seed.contains(pid) {
+            seed.append(pid)
+        }
+        appMRU = seed
         for app in ws.runningApplications where app.activationPolicy == .regular {
             observe(app.processIdentifier)
         }
         refreshAll()
+        // After launch finishes, so the menu bar item appears without waiting on icons.
+        DispatchQueue.main.async { AppIcons.warm(ws.runningApplications) }
 
         let nc = ws.notificationCenter
         nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             guard let self, let pid = Self.pid(note) else { return }
+            touchApp(pid)
             observe(pid)
             recordFocusedWindow(of: pid)
             refresh(pid)
@@ -39,10 +51,14 @@ final class WindowTracker {
         nc.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
             guard let pid = Self.pid(note) else { return }
             self?.observe(pid)
+            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                AppIcons.warm([app])
+            }
         }
         nc.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             guard let pid = Self.pid(note) else { return }
             self?.forget(pid)
+            AppIcons.forget(pid)
         }
         // Titles and new windows in background apps; cheap because slow apps are never queued twice.
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.refreshAll() }
@@ -54,6 +70,12 @@ final class WindowTracker {
         mru.removeAll { $0 == id }
         mru.insert(id, at: 0)
         if mru.count > maxEntries { mru.removeLast(mru.count - maxEntries) }
+    }
+
+    /// Moves an app to the front of the app MRU list.
+    func touchApp(_ pid: pid_t) {
+        appMRU.removeAll { $0 == pid }
+        appMRU.insert(pid, at: 0)
     }
 
     func refreshAll() {
@@ -115,6 +137,7 @@ final class WindowTracker {
 
     private func forget(_ pid: pid_t) {
         observing.remove(pid)
+        appMRU.removeAll { $0 == pid }
         snapshots[pid] = nil
         if let observer = observers.removeValue(forKey: pid) {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)

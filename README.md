@@ -21,10 +21,12 @@ Cmd+Tab activates a whole app, so every window of that app jumps forward and bur
 - **Quick filter:** start typing to narrow the list by window title or app name.
 - **Keyboard or mouse:** arrow keys, Tab/Shift+Tab, hover, the scroll wheel and clicks all work.
 - **Adjustable size:** set the font size in Preferences; the whole panel scales with it.
+- **Multiple displays:** the switcher appears on every screen by default, or only on the one with the mouse pointer if you turn that off in Preferences.
+- **Optional Cmd+Tab takeover:** replace the macOS app switcher with AltTab. Cmd+Tab can open the window list (default) or an app list that has the same pins, numbers, filter and mouse support.
 
-| Filter | Larger font |
-|---|---|
-| <img src="docs/filter.png" alt="Filtering the list"> | <img src="docs/large-font.png" alt="20 pt font size"> |
+| Filter | Larger font | Cmd+Tab app list |
+|---|---|---|
+| <img src="docs/filter.png" alt="Filtering the list"> | <img src="docs/large-font.png" alt="20 pt font size"> | <img src="docs/apps.png" alt="App switcher"> |
 
 ## Install
 1. Download `AltTab-x.y.z.zip` from [Releases](https://github.com/sr3d/AltTab/releases), unzip it, and move `AltTab.app` to `/Applications`.
@@ -34,13 +36,14 @@ Cmd+Tab activates a whole app, so every window of that app jumps forward and bur
    ```
 3. Launch it and grant **Accessibility** when asked (System Settings → Privacy & Security → Accessibility). The menu-bar label reads `AltTab ⚠︎` until the permission is active, then just `AltTab`.
 
-Turn on **Launch at Login** from the menu-bar menu.
+Turn on **Launch at Login** from the menu-bar menu or Preferences.
 
 ## Usage
 | Keys | Action |
 |---|---|
 | **Option+Tab** (tap) | switch to the previous window |
 | **Option** held + **Tab** | open the list; release Option to switch |
+| **Cmd+Tab** (if enabled in Preferences) | the same, listing windows (default) or running apps, as chosen in Preferences |
 
 While the list is open:
 
@@ -65,11 +68,16 @@ Scope and limits:
 - Focus history starts when AltTab launches; before that, the list uses stacking order.
 
 ### Preferences
-Menu bar → **AltTab → Preferences…** (⌘,)
+Menu bar → **AltTab → Preferences…** (⌘,) or **About AltTab**
 
-<img src="docs/preferences.png" width="440" alt="Preferences window">
+| General | About |
+|---|---|
+| <img src="docs/preferences.png" alt="General preferences"> | <img src="docs/about.png" alt="About"> |
 
-**Font size** ranges from 11 to 28 pt (default 14). Rows, icons, the filter bar and the panel width all scale with it.
+- **Font size:** 11–28 pt (default 14). Rows, icons, the filter bar and the panel width all scale with it.
+- **Use AltTab for Cmd+Tab:** Cmd+Tab (and Cmd+Shift+Tab) open AltTab. Choose what it shows: **Windows** (default, the same list as Option+Tab) or **Apps** (running apps, ordered by most recent use). For Apps, pick the layout: a **List** (default) or **Icons**, a horizontal strip of app icons like the macOS switcher. Also choose whether switching to an app brings **all of its windows** forward (like macOS) or **only its most recent window**. To hear Cmd+Tab, AltTab turns off the macOS switcher while it runs. It turns it back on when AltTab quits, is killed, or crashes, and again on the next launch.
+- **Show switcher on all displays:** on (default) shows the panel on every connected screen, and you can use any of them. Off shows it only on the screen with the mouse pointer.
+- **Launch at login.**
 
 ## Build from source
 Requires macOS 13+ and Swift 5.9+. The Command Line Tools are enough; Xcode is only needed for universal (arm64 + x86_64) builds.
@@ -100,7 +108,8 @@ git tag v0.1.0 && git push origin v0.1.0
 ## How it works
 | File | Role |
 |---|---|
-| `Sources/AltTab/HotkeyTap.swift` | `CGEventTap` for Option+Tab and the keys used while the list is open. Keys are swallowed so they never reach the app underneath. |
+| `Sources/AltTab/HotkeyTap.swift` | `CGEventTap` for Option+Tab (and Cmd+Tab when enabled) and the keys used while the list is open. Keys are swallowed so they never reach the app underneath. |
+| `Sources/AltTab/NativeCommandTab.swift` | Turns the macOS Cmd+Tab switcher off or on (`CGSSetSymbolicHotKeyEnabled`), and restores it on quit, on kill signals and after crashes. |
 | `Sources/AltTab/WindowTracker.swift` | Builds the focus history from an `AXObserver` per app plus workspace activation events. It also keeps a background cache of each app's windows: some apps take seconds to answer Accessibility queries, so a keypress never waits on them. |
 | `Sources/AltTab/Switcher.swift` | List state: ordering, pins, filter, number keys, stay-open mode |
 | `Sources/AltTab/SwitcherPanel.swift` | The non-activating HUD panel and its mouse handling |

@@ -17,6 +17,25 @@ public enum WindowFocuser {
         }
     }
 
+    /// Activates an app. With `allWindows` every window comes forward like Cmd+Tab; otherwise only
+    /// `window` (its most recent one) does. Apps with no windows are just made frontmost.
+    public static func activateApp(pid: pid_t, allWindows: Bool, window: WindowInfo?) {
+        let app = NSRunningApplication(processIdentifier: pid)
+        if app?.isHidden == true { app?.unhide() }
+        if !allWindows, let window { return focus(window) }
+        guard let setFront = SkyLight.setFrontProcess else {
+            app?.activate(options: allWindows ? [.activateAllWindows] : [])
+            return
+        }
+        var psn = ProcessSerialNumber()
+        GetProcessForPID(pid, &psn)
+        _ = setFront(&psn, 0, SkyLight.userGenerated | (allWindows ? SkyLight.allWindows : 0))
+        if let window {
+            SkyLight.makeKeyWindow(&psn, window.id)
+            raise(window.element)
+        }
+    }
+
     /// Raises within the app's own window stack. AX IPC can block on a busy app, so it runs off
     /// the main thread; the SkyLight calls above already brought the window forward.
     private static func raise(_ element: AXUIElement?) {
