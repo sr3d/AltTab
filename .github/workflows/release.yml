@@ -1,0 +1,65 @@
+name: Release
+
+# Pushing a tag like v1.2.0 builds AltTab 1.2.0 and publishes a GitHub Release with the DMG
+# and a zip of the app attached:
+#   git tag v1.2.0 && git push origin v1.2.0
+# Re-running it (or running it by hand for an existing tag) replaces the release's files.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)build and release, e.g. v1.2.0
+        required: true
+
+permissions:
+  contents: write   # to create the release and upload its files
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Version
+        id: version
+        run: |
+          [[ "$TAG" == v* ]] || { echo "::error::tag must look like v1.2.0, got $TAG"; exit 1; }
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build app and DMG
+        id: package
+        env:
+          ALTTAB_UNIVERSAL: "1"
+          ALTTAB_SIGN_IDENTITY: "-"   # ad-hoc; no Developer ID in CI
+          ALTTAB_VERSION: ${{ steps.version.outputs.version }}
+          ALTTAB_BUILD: ${{ github.run_number }}
+        run: ./scripts/make-dmg.sh
+
+      - name: Verify
+        run: |
+          [[ "$(lipo -archs build/AltTab.app/Contents/MacOS/AltTab)" == *arm64* ]]
+          [[ "$(lipo -archs build/AltTab.app/Contents/MacOS/AltTab)" == *x86_64* ]]
+          codesign --verify --verbose build/AltTab.app
+          PLIST_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/AltTab.app/Contents/Info.plist)"
+          [[ "$PLIST_VERSION" == "${{ steps.version.outputs.version }}" ]]
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DMG: ${{ steps.package.outputs.dmg }}
+          ZIP: ${{ steps.package.outputs.zip }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$DMG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" "$DMG" "$ZIP" --verify-tag --title "AltTab $TAG" --generate-notes
+          fi

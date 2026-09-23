@@ -1,16 +1,19 @@
 name: Build
 
-# Every push/PR builds AltTab.app and uploads it as a workflow artifact.
-# Pushing a tag like v1.2.0 also publishes a GitHub Release with the zipped app attached.
+# Every push to main and every pull request builds AltTab.dmg (and a zip of the app) and
+# uploads them as a workflow artifact. Releases are built by release.yml.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write   # needed to create releases on tag pushes
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -23,23 +26,13 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Version
-        id: version
-        run: |
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          else
-            VERSION="0.0.0-dev+${GITHUB_SHA::7}"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Build universal app
+      - name: Build app and DMG
+        id: package
         env:
           ALTTAB_UNIVERSAL: "1"
           ALTTAB_SIGN_IDENTITY: "-"   # ad-hoc; no Developer ID in CI
-          ALTTAB_VERSION: ${{ steps.version.outputs.version }}
           ALTTAB_BUILD: ${{ github.run_number }}
-        run: ./scripts/build-app.sh --no-install
+        run: ./scripts/make-dmg.sh
 
       - name: Verify
         run: |
@@ -47,16 +40,9 @@ jobs:
           codesign --verify --verbose build/AltTab.app
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/AltTab.app/Contents/Info.plist
 
-      - name: Zip
-        run: ditto -c -k --keepParent build/AltTab.app "build/AltTab-${{ steps.version.outputs.version }}.zip"
-
       - uses: actions/upload-artifact@v4
         with:
-          name: AltTab-${{ steps.version.outputs.version }}
-          path: build/AltTab-*.zip
-
-      - name: Publish release
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" build/AltTab-*.zip --title "AltTab $GITHUB_REF_NAME" --generate-notes
+          name: AltTab-${{ steps.package.outputs.version }}
+          path: |
+            ${{ steps.package.outputs.dmg }}
+            ${{ steps.package.outputs.zip }}

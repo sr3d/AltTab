@@ -32,7 +32,7 @@ Cmd+Tab activates a whole app, so every window of that app jumps forward and bur
 <p align="center"><img src="docs/apps-icons.png" width="620" alt="Cmd+Tab app switcher, icons layout"></p>
 
 ## Install
-1. Download `AltTab-x.y.z.zip` from [Releases](https://github.com/sr3d/AltTab/releases), unzip it, and move `AltTab.app` to `/Applications`.
+1. Download `AltTab-x.y.z.dmg` from [Releases](https://github.com/sr3d/AltTab/releases), open it, and drag `AltTab.app` onto the `Applications` shortcut. A `.zip` of the app is there too.
 2. The release builds are not notarized, so macOS blocks the first launch. Open **System Settings → Privacy & Security** and click **Open Anyway**, or run:
    ```sh
    xattr -dr com.apple.quarantine /Applications/AltTab.app
@@ -91,14 +91,16 @@ Requires macOS 13+ and Swift 5.9+. The Command Line Tools are enough; Xcode is o
 ./scripts/build-app.sh --open      # build, sign, install to ~/Applications, launch
 ./scripts/build-app.sh --no-install
 ALTTAB_UNIVERSAL=1 ./scripts/build-app.sh --no-install   # needs Xcode
+./scripts/make-dmg.sh              # build, then package build/AltTab-<version>.dmg and .zip
 ```
 
 **Signing:** macOS ties the Accessibility grant to the code signature. The script signs with an identity named `AltTab Dev` if one exists, otherwise with your first `Apple Development` certificate. Either one stays the same across rebuilds, so the grant sticks. If neither exists, the script falls back to an ad-hoc signature, and you'd have to re-grant Accessibility after every build. To create a stable identity for free: Keychain Access → Certificate Assistant → Create a Certificate… (Name `AltTab Dev`, Type *Code Signing*). If the grant gets stuck, run `tccutil reset Accessibility com.sr3d.AltTab` and relaunch.
 
-**CI:** [`.github/workflows/build.yml`](.github/workflows/build.yml) builds a universal, ad-hoc-signed app on every push and pull request and uploads it as a workflow artifact. Pushing a `v*` tag also publishes a GitHub Release with the zip attached:
+**CI:** both workflows run `scripts/make-dmg.sh` to build a universal, ad-hoc-signed app and package it as a DMG and a zip. [`build.yml`](.github/workflows/build.yml) runs on every push to `main` and every pull request, and uploads them as a workflow artifact. [`release.yml`](.github/workflows/release.yml) runs when a `v*` tag is pushed, and publishes a GitHub Release with both files attached. GitHub builds everything on its own macOS machines, so a release is just a tag:
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
 ```
+To rebuild the files for an existing tag, run **Release** by hand from the Actions tab and enter the tag.
 
 **Developer tools:**
 - `swift run FocusSpike` lists on-screen windows; `swift run FocusSpike <title>` focuses one.
