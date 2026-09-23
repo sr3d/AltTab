@@ -49,7 +49,11 @@ enum Settings {
     /// Apps in the quick-launch bar, in order.
     static var quickLaunchApps: [QuickLaunchApp] {
         get {
-            (defaults.array(forKey: "quickLaunchApps") as? [[String: String]] ?? []).compactMap { d in
+            // Never set: start with Finder and Activity Monitor. An emptied list stays empty.
+            guard let stored = defaults.array(forKey: "quickLaunchApps") as? [[String: String]] else {
+                return QuickLaunchApp.defaults
+            }
+            return stored.compactMap { d in
                 d["path"].map { QuickLaunchApp(path: $0, bundleID: d["bundleID"]) }
             }
         }

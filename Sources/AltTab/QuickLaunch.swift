@@ -28,6 +28,12 @@ struct QuickLaunchApp: Equatable {
     }
 
     var icon: NSImage { QuickLaunch.icon(for: self) }
+
+    /// The bar before the user has changed it.
+    static let defaults = [
+        QuickLaunchApp(path: "/System/Library/CoreServices/Finder.app", bundleID: "com.apple.finder"),
+        QuickLaunchApp(path: "/System/Applications/Utilities/Activity Monitor.app", bundleID: "com.apple.ActivityMonitor"),
+    ]
 }
 
 enum QuickLaunch {

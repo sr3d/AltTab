@@ -82,7 +82,7 @@ Menu bar → **AltTab → Preferences…** (⌘,) or **About AltTab**
 - **Use AltTab for Cmd+Tab:** Cmd+Tab (and Cmd+Shift+Tab) open AltTab. Choose what it shows: **Windows** (default, the same list as Option+Tab) or **Apps** (running apps, ordered by most recent use). For Apps, pick the layout: a **List** (default) or **Icons**, a horizontal strip of app icons like the macOS switcher. Also choose whether switching to an app brings **all of its windows** forward (like macOS) or **only its most recent window**. To hear Cmd+Tab, AltTab turns off the macOS switcher while it runs. It turns it back on when AltTab quits, is killed, or crashes, and again on the next launch.
 - **Show switcher on all displays:** on (default) shows the panel on every connected screen, and you can use any of them. Off shows it only on the screen with the mouse pointer.
 - **Launch at login.**
-- **Quick Launch tab:** the apps in the bar at the top of the switcher. Add with **+** or by dragging apps in from Finder, remove with **−** or Delete, drag to reorder. The first ten get Shift+1–9, 0.
+- **Quick Launch tab:** the apps in the bar at the top of the switcher (Finder and Activity Monitor to start with). Add with **+** or by dragging apps in from Finder, remove with **−** or Delete, drag to reorder. The first ten get Shift+1–9, 0.
 
 ## Build from source
 Requires macOS 13+ and Swift 5.9+. The Command Line Tools are enough; Xcode is only needed for universal (arm64 + x86_64) builds.
