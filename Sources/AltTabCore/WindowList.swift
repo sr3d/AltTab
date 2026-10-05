@@ -49,6 +49,23 @@ public enum WindowList {
         }
     }
 
+    /// Which of `ids` still exist, on any Space and minimized or not (`onScreen()` only sees the
+    /// current Space), with each one's owner pid. Only looks up the given windows, so it's cheap.
+    public static func existing(_ ids: [CGWindowID]) -> [CGWindowID: pid_t] {
+        guard !ids.isEmpty else { return [:] }
+        // The array holds raw window numbers, not CFNumbers.
+        var values = ids.map { UnsafeRawPointer(bitPattern: UInt($0)) }
+        let array = values.withUnsafeMutableBufferPointer { CFArrayCreate(nil, $0.baseAddress, $0.count, nil) }
+        guard let info = CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]] else { return [:] }
+        var owners: [CGWindowID: pid_t] = [:]
+        for window in info {
+            if let id = window[kCGWindowNumber as String] as? CGWindowID, let pid = window[kCGWindowOwnerPID as String] as? pid_t {
+                owners[id] = pid
+            }
+        }
+        return owners
+    }
+
     /// Running apps by pid. Walking `runningApplications` costs ~20 ms after the app has been
     /// idle (it re-syncs with the system), so `prefetch()` does it when the modifier goes down,
     /// ahead of Tab. Main thread only.

@@ -24,6 +24,7 @@ final class Switcher {
     private var stayOpen = false
     private var windowPins: [CGWindowID] = [] // session-lifetime, in pin order
     private var appPins: [CGWindowID] = []
+    private var groups = WindowGroups.load()     // saved; shown with both lists
     private var pinned: [CGWindowID] {
         get { mode == .windows ? windowPins : appPins }
         set { if mode == .windows { windowPins = newValue } else { appPins = newValue } }
@@ -31,6 +32,8 @@ final class Switcher {
     private var launchers: [QuickLaunchApp] = [] // quick-launch bar, read at start
     private var launcherItems: [SwitcherPanel.Launcher] = []
     private var launcherKeys: [String?] = []     // each launcher's Shift+key
+    private var jumps: [QuickJump] = []          // Quick Jumps box, read at start
+    private var jumpItems: [SwitcherPanel.Jump] = []
     private var showTimer: Timer?
     private var outsideClickMonitor: Any?
     /// Long enough that a quick tap doesn't flash the panel. The panel is built right away and
@@ -76,6 +79,39 @@ final class Switcher {
         panel.onMovePin = { [weak self] from, to in
             guard let self, visible.indices.contains(from), visible.indices.contains(to) else { return }
             movePin(visible[from].id, to: visible[to].id)
+        }
+        panel.onDropOnGroup = { [weak self] row, group in
+            guard let self, visible.indices.contains(row) else { return }
+            // An app row adds the app's most recent window on this Space.
+            guard let window = mode == .windows ? visible[row] : recentWindow(of: visible[row].pid) else { return }
+            if let group { groups.add(window, to: group) } else { groups.newGroup(with: window) }
+            WindowThumbnail.requestPermissionOnce()
+            enterStayOpen()
+            render()
+            captureThumbnails(of: [window.id])
+        }
+        panel.onChooseMember = { [weak self] group, member in
+            guard let self, let member = groups.member(group, member) else { return }
+            if let window = member.window {
+                finish(focusing: window, as: .windows)
+            } else if let app = member.app {
+                // Not open (e.g. after a reboot): open its app. If the app brings back a window
+                // with the same title, the member reconnects to it the next time AltTab opens.
+                finish(focusing: nil)
+                QuickLaunch.open(app)
+            }
+        }
+        panel.onJump = { [weak self] index in
+            guard let self, jumps.indices.contains(index) else { return }
+            let jump = jumps[index]
+            finish(focusing: nil)
+            QuickJumps.open(jump)
+        }
+        panel.onRemoveMember = { [weak self] group, member in
+            guard let self else { return }
+            groups.remove(member, from: group)
+            enterStayOpen()
+            render()
         }
     }
 
@@ -164,6 +200,8 @@ final class Switcher {
         launchers = Settings.quickLaunchApps
         launcherKeys = QuickLaunch.keys(launchers)
         launcherItems = zip(launchers, launcherKeys).map { .init(name: $0.name, icon: $0.icon, shortcut: QuickLaunch.label($1)) }
+        jumps = Settings.quickJumps
+        jumpItems = jumps.map { .init(name: $0.name, detail: $0.detail, icon: $0.icon, exists: $0.exists) }
         query = ""
         focus = .list
         applyFilter(selectFirst: false)
@@ -174,6 +212,19 @@ final class Switcher {
         // Cache misses (new apps/windows) show app name only; fill them in for next time.
         if mode == .windows {
             for pid in Set(all.filter { $0.element == nil }.map(\.pid)) { tracker.refresh(pid) }
+        }
+        if !groups.groups.isEmpty {
+            // Members on other Spaces aren't listed, so their windows are checked by ID.
+            let windows = mode == .windows ? all : WindowList.build(screen, snapshots: tracker.snapshots)
+            groups.reconnect(existing: WindowList.existing(groups.windowIDs), windows: windows,
+                             make: { [tracker] id, pid in
+                guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
+                let name = app.localizedName ?? "?"
+                let ax = tracker.snapshots[pid]?.windows[id]
+                return WindowInfo(id: id, pid: pid, element: ax?.element, title: ax.map(\.title).flatMap { $0.isEmpty ? nil : $0 } ?? name,
+                                  appName: name, icon: AppIcons.icon(for: app))
+            })
+            captureThumbnails(of: groups.openIDs)
         }
         let timer = Timer(timeInterval: showDelay, repeats: false) { [weak self] _ in self?.reveal() }
         RunLoop.main.add(timer, forMode: .common) // also fire while a menu is tracking
@@ -350,10 +401,46 @@ final class Switcher {
                    placeholder: mode == .windows ? "Type to filter windows" : "Type to filter apps",
                    layout: mode == .apps ? Settings.appSwitcherLayout : .list, visible: !offscreen,
                    launchers: launcherItems, filterFocused: focus == .filter, focusedLauncher: focusedLauncher)
+        panel.showGroups(groupItems)
+        panel.showJumps(jumpItems)
+    }
+
+    private var groupItems: [SwitcherPanel.Group] {
+        groups.groups.map { group in
+            .init(name: group.name, members: group.members.map { m in
+                let name = m.title == m.appName ? m.appName : "\(m.title)  —  \(m.appName)"
+                return .init(id: m.window?.id ?? 0, caption: m.title,
+                             title: m.window == nil ? "\(name)\nNot open. Click to open \(m.appName)." : name,
+                             icon: m.window?.icon ?? m.app?.icon, preview: m.window.flatMap { groups.thumbnails[$0.id] },
+                             isOpen: m.window != nil)
+            })
+        }
+    }
+
+    /// Captures group members' previews off the main thread (a few small images), then shows
+    /// them. Until they arrive the boxes show the previous ones, so opening isn't delayed.
+    private func captureThumbnails(of ids: [CGWindowID]) {
+        guard !ids.isEmpty, WindowThumbnail.hasPermission else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let images = ids.compactMap { id in WindowThumbnail.capture(id, maxPixels: 480).map { (id, $0) } }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !images.isEmpty else { return }
+                for (id, image) in images { groups.setThumbnail(image, for: id) }
+                // Before the show delay is over, update the panel without revealing it early.
+                if isOpen { render(offscreen: showTimer != nil) }
+            }
+        }
+    }
+
+    /// The app's most recent window on this Space, if it has one.
+    private func recentWindow(of pid: pid_t) -> WindowInfo? {
+        WindowList.order(WindowList.build(WindowList.onScreen(), snapshots: tracker.snapshots), mru: tracker.mru)
+            .first { $0.pid == pid }
     }
 
     /// Single exit path: hides everything, resets per-session state, returns the hotkey to idle.
-    private func finish(focusing target: WindowInfo?) {
+    /// `kind` says what `target` is (a window or an app row); it defaults to what the list shows.
+    private func finish(focusing target: WindowInfo?, as kind: SwitcherMode? = nil) {
         showTimer?.invalidate()
         showTimer = nil
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
@@ -366,15 +453,14 @@ final class Switcher {
         stayOpen = false
         onDismiss?()
         guard let target else { return }
-        switch mode {
+        switch kind ?? mode {
         case .windows:
             tracker.touch(target.id)
             WindowFocuser.focus(target)
         case .apps:
             tracker.touchApp(target.pid)
             // The app's most recent window on this Space, if any, becomes the key window.
-            let windows = WindowList.order(WindowList.build(WindowList.onScreen(), snapshots: tracker.snapshots), mru: tracker.mru)
-            let recent = windows.first { $0.pid == target.pid }
+            let recent = recentWindow(of: target.pid)
             if let recent { tracker.touch(recent.id) }
             WindowFocuser.activateApp(pid: target.pid, allWindows: Settings.appSwitchBringsAllWindows, window: recent)
         }

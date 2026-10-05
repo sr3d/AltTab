@@ -2,10 +2,11 @@ import AppKit
 import ServiceManagement
 
 /// Preferences: a General tab (font size, Cmd+Tab takeover, all displays, launch at login),
-/// a Quick Launch tab (apps in the bar at the top of the switcher) and an About tab.
+/// a Quick Launch tab (apps in the bar at the top of the switcher), a Quick Jumps tab (folders,
+/// files and URLs in the box beside it) and an About tab.
 /// Changes are saved immediately; `onChange` lets the app apply them (e.g. the Cmd+Tab hotkey).
 final class PreferencesWindow: NSWindowController {
-    enum Tab: Int { case general, quickLaunch, about }
+    enum Tab: Int { case general, quickLaunch, quickJumps, about }
 
     static let repoURL = URL(string: "https://github.com/sr3d/AltTab")!
 
@@ -16,8 +17,8 @@ final class PreferencesWindow: NSWindowController {
     private let valueLabel = NSTextField(labelWithString: "")
     private let preview = NSTextField(labelWithString: "Sample window title  —  Sublime Text")
     private let takeoverBox = NSButton(checkboxWithTitle: "Use AltTab for Cmd+Tab", target: nil, action: nil)
-    private let cmdWindowsRadio = NSButton(radioButtonWithTitle: "Windows (same as Option+Tab)", target: nil, action: nil)
-    private let cmdAppsRadio = NSButton(radioButtonWithTitle: "Apps (like the macOS switcher)", target: nil, action: nil)
+    private let cmdWindowsRadio = NSButton(radioButtonWithTitle: "Windows (Option+Tab then switches apps)", target: nil, action: nil)
+    private let cmdAppsRadio = NSButton(radioButtonWithTitle: "Apps, like macOS (Option+Tab keeps switching windows)", target: nil, action: nil)
     private let layoutLabel = NSTextField(labelWithString: "App list layout:")
     private let layoutPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let showsLabel = NSTextField(labelWithString: "Cmd+Tab shows:")
@@ -28,6 +29,7 @@ final class PreferencesWindow: NSWindowController {
     private let allScreensBox = NSButton(checkboxWithTitle: "Show switcher on all displays", target: nil, action: nil)
     private let contentWidth: CGFloat = 440
     private let quickLaunchEditor = QuickLaunchEditor()
+    private let quickJumpsEditor = QuickJumpsEditor()
 
     init() {
         let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: true)
@@ -37,6 +39,7 @@ final class PreferencesWindow: NSWindowController {
         tabs.tabStyle = .toolbar
         tabs.addTabViewItem(item("General", symbol: "gearshape", generalView()))
         tabs.addTabViewItem(item("Quick Launch", symbol: "square.grid.2x2", quickLaunchView()))
+        tabs.addTabViewItem(item("Quick Jumps", symbol: "bookmark", quickJumpsView()))
         tabs.addTabViewItem(item("About", symbol: "info.circle", aboutView()))
         window.contentViewController = tabs
         window.title = "AltTab Preferences"
@@ -75,7 +78,7 @@ final class PreferencesWindow: NSWindowController {
         let switcherTitle = sectionTitle("App switcher")
         takeoverBox.target = self
         takeoverBox.action = #selector(takeoverChanged)
-        let takeoverNote = note("Replaces the macOS Cmd+Tab switcher with AltTab. Option+Tab keeps switching windows. The macOS switcher comes back when AltTab quits.")
+        let takeoverNote = note("Replaces the macOS Cmd+Tab switcher with AltTab. Option+Tab shows the other list, so windows and apps are both a key away. The macOS switcher comes back when AltTab quits.")
         for radio in [cmdWindowsRadio, cmdAppsRadio] {
             radio.target = self
             radio.action = #selector(commandTabModeChanged)
@@ -181,13 +184,13 @@ final class PreferencesWindow: NSWindowController {
         cmdWindowsRadio.isEnabled = takeover
         cmdAppsRadio.isEnabled = takeover
         showsLabel.textColor = takeover ? .labelColor : .disabledControlTextColor
-        // Only the app list brings an app forward, so this applies to Cmd+Tab in app mode.
-        allWindowsRadio.isEnabled = takeover && apps
-        recentWindowRadio.isEnabled = takeover && apps
+        // The app list is only reachable with takeover on (on Cmd+Tab, or else on Option+Tab).
+        allWindowsRadio.isEnabled = takeover
+        recentWindowRadio.isEnabled = takeover
         layoutPopup.selectItem(at: Settings.appSwitcherLayout == .icons ? 1 : 0)
-        layoutPopup.isEnabled = takeover && apps
-        layoutLabel.textColor = takeover && apps ? .labelColor : .disabledControlTextColor
-        bringLabel.textColor = takeover && apps ? .labelColor : .disabledControlTextColor
+        layoutPopup.isEnabled = takeover
+        layoutLabel.textColor = takeover ? .labelColor : .disabledControlTextColor
+        bringLabel.textColor = takeover ? .labelColor : .disabledControlTextColor
         allScreensBox.state = Settings.showOnAllScreens ? .on : .off
         loginBox.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
@@ -198,6 +201,19 @@ final class PreferencesWindow: NSWindowController {
         let title = sectionTitle("Quick Launch")
         let hint = note("Apps you use all the time, shown as icons at the top of the switcher. While the switcher is open, press Shift+1…9, 0 to open one, or click its icon. Click a shortcut and press a key to give the app its own instead: a letter like C for Calendar (press it right after Cmd+Tab, before typing a filter), or hold Shift for Shift+S. Add apps with + or by dragging them here from Finder; drag to reorder.")
         let stack = NSStackView(views: [title, hint, quickLaunchEditor.makeView(width: contentWidth)])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.setCustomSpacing(12, after: hint)
+        return padded(stack)
+    }
+
+    // MARK: Quick Jumps
+
+    private func quickJumpsView() -> NSView {
+        let title = sectionTitle("Quick Jumps")
+        let hint = note("Folders, files and web pages you open all the time, listed in a box to the right of the switcher. Click one to open it: a folder in Finder, a file in its app, a URL in your browser. Drag folders and files here from Finder (or links from your browser), or use + to choose files or add a URL. Drag to reorder; double-click a name to rename it.")
+        let stack = NSStackView(views: [title, hint, quickJumpsEditor.makeView(width: contentWidth)])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8

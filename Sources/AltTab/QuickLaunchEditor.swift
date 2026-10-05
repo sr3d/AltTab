@@ -250,7 +250,7 @@ private final class ShortcutRecorder: NSButton {
 }
 
 /// Table that removes the selection on Delete / Forward Delete.
-private final class DeletableTableView: NSTableView {
+final class DeletableTableView: NSTableView {
     var onDelete: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {

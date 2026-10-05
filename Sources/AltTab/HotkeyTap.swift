@@ -1,8 +1,8 @@
 import AppKit
 import CoreGraphics
 
-/// Session event tap for Option+Tab (windows), optionally Cmd+Tab (windows or apps), and the keys used
-/// while the switcher is open.
+/// Session event tap for Option+Tab (windows, or apps when Cmd+Tab lists windows), optionally
+/// Cmd+Tab (windows or apps), and the keys used while the switcher is open.
 /// While active, every key without Cmd is swallowed so nothing leaks into the front app.
 /// The swallow decision is made inline, but actions are dispatched async so the
 /// WindowServer never waits on our work (a slow tap stalls all input and gets disabled).
@@ -23,6 +23,8 @@ final class HotkeyTap {
     /// What Cmd+Tab opens; nil leaves Cmd+Tab alone. The native switcher must be disabled
     /// separately (NativeCommandTab) or the Dock swallows Cmd+Tab before this tap sees it.
     var commandTabMode: SwitcherMode?
+    /// What Option+Tab opens.
+    var optionTabMode = SwitcherMode.windows
     private(set) var mode = Mode.idle
     var isInstalled: Bool { tap != nil }
     /// The modifier that opened the switcher; releasing it commits (in `.held` mode).
@@ -87,7 +89,7 @@ final class HotkeyTap {
                 let option = flags.contains(.maskAlternate), command = flags.contains(.maskCommand)
                 let start: (SwitcherMode, CGEventFlags)
                 if option && !command {
-                    start = (.windows, .maskAlternate)
+                    start = (optionTabMode, .maskAlternate)
                 } else if command && !option, let commandTabMode {
                     start = (commandTabMode, .maskCommand)
                 } else {

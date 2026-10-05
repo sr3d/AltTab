@@ -8,6 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let tracker = WindowTracker()
     private lazy var switcher = Switcher(tracker: tracker)
     private var trustTimer: Timer?
+    private var secureInputTimer: Timer?
+    private var trusted = false
+    /// PID holding Secure Keyboard Entry; while set, our event tap sees no keystrokes.
+    private var secureInputPID: pid_t?
+    private let secureInputItem = NSMenuItem(title: "", action: #selector(showSecureInputHolder), keyEquivalent: "")
     private let accessibilityItem = NSMenuItem(title: "", action: #selector(openAccessibilitySettings), keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
     private lazy var preferences = PreferencesWindow()
@@ -17,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         accessibilityItem.target = self
         loginItem.target = self
+        secureInputItem.target = self
+        secureInputItem.isHidden = true
+        menu.addItem(secureInputItem)
         menu.addItem(accessibilityItem)
         menu.addItem(loginItem)
         let prefsItem = NSMenuItem(title: "Preferences…", action: #selector(showPreferences), keyEquivalent: ",")
@@ -29,6 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit AltTab", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         menu.delegate = self
         statusItem.menu = menu
+
+        refreshSecureInput()
+        secureInputTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.refreshSecureInput()
+        }
+        secureInputTimer?.tolerance = 1
 
         // Restore the macOS Cmd+Tab if a previous run was killed while it was taken over;
         // it's re-disabled in activate() once the event tap is running.
@@ -58,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // After the app icon cache warms (queued by tracker.start), so the warm-up uses it.
         DispatchQueue.main.async { [weak self] in
             QuickLaunch.warm()
+            QuickJumps.warm()
             self?.switcher.warmUp()
         }
         // New displays get new panels; set those up too.
@@ -72,10 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Hands Cmd+Tab to AltTab (or back to macOS). Only takes it when our tap is running,
-    /// so Cmd+Tab never ends up handled by nobody.
+    /// so Cmd+Tab never ends up handled by nobody. Option+Tab gets whichever list Cmd+Tab
+    /// doesn't show, so both stay a key away.
     private func applyCommandTabSetting() {
         let takeover = Settings.commandTabTakeover && tap.isInstalled
         tap.commandTabMode = takeover ? Settings.commandTabMode : nil
+        tap.optionTabMode = takeover && Settings.commandTabMode == .windows ? .apps : .windows
         NativeCommandTab.setEnabled(!takeover)
     }
 
@@ -84,8 +101,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatus(trusted: Bool) {
-        statusItem.button?.title = trusted ? "AltTab" : "AltTab ⚠︎"
+        self.trusted = trusted
         accessibilityItem.title = trusted ? "Accessibility: granted" : "Grant Accessibility Access…"
+        updateStatusTitle()
+    }
+
+    /// Secure Input wins over the ⚠︎: it's what is blocking the shortcuts right now.
+    private func updateStatusTitle() {
+        guard let button = statusItem.button else { return }
+        if let pid = secureInputPID {
+            let title = NSMutableAttributedString(string: "AltTab ")
+            title.append(NSAttributedString(string: "✕", attributes: [.foregroundColor: NSColor.systemRed]))
+            button.attributedTitle = title
+            button.toolTip = "Secure Input is on (\(Self.processName(pid))) — AltTab can't see keystrokes"
+        } else {
+            button.title = trusted ? "AltTab" : "AltTab ⚠︎"
+            button.toolTip = nil
+        }
+    }
+
+    /// PID of the process holding Secure Keyboard Entry, which blinds our event tap; nil if none.
+    private static func secureInputHolder() -> pid_t? {
+        guard let dict = CGSessionCopyCurrentDictionary() as? [String: Any],
+              let pid = dict["kCGSSessionSecureInputPID"] as? Int, pid > 0 else { return nil }
+        return pid_t(pid)
+    }
+
+    private static func processName(_ pid: pid_t) -> String {
+        NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
+    }
+
+    private func refreshSecureInput() {
+        let pid = Self.secureInputHolder()
+        guard pid != secureInputPID else { return }
+        secureInputPID = pid
+        if let pid {
+            secureInputItem.title = "Secure Input on (\(Self.processName(pid))) — shortcuts blocked"
+        }
+        secureInputItem.isHidden = pid == nil
+        updateStatusTitle()
+    }
+
+    /// Brings the holder forward so the user can leave its password field or quit it.
+    @objc private func showSecureInputHolder() {
+        guard let pid = secureInputPID else { return }
+        NSRunningApplication(processIdentifier: pid)?.activate()
     }
 
     @objc private func openAccessibilitySettings() {
@@ -113,6 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        refreshSecureInput()
         updateStatus(trusted: AXIsProcessTrusted())
     }
 }

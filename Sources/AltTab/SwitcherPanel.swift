@@ -36,6 +36,10 @@ final class SwitcherPanel {
         var nameLabel: NSTextField?
         /// List layout: shown beside the rows when they don't all fit.
         let scroller = ListScroller()
+        /// Window groups: a separate window of boxes beside this one (left, by preference).
+        let column = SideColumn<GroupsKey>()
+        /// Quick Jumps: another window beside this one (right, by preference).
+        let jumps = SideColumn<JumpsKey>()
 
         init(onHover: @escaping (Int) -> Void, onScroll: @escaping (Int) -> Void, onScrollTo: @escaping (Int) -> Void) {
             panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -94,6 +98,13 @@ final class SwitcherPanel {
     var onScroll: ((Int) -> Void)?
     /// Click on a quick-launch icon (0-based).
     var onLaunch: ((Int) -> Void)?
+    /// A row dropped on a group box; `group` is nil for the "+ New group" box.
+    var onDropOnGroup: ((_ row: Int, _ group: Int?) -> Void)?
+    /// Click on a group member's preview / on its "×".
+    var onChooseMember: ((_ group: Int, _ member: Int) -> Void)?
+    var onRemoveMember: ((_ group: Int, _ member: Int) -> Void)?
+    /// Click on a Quick Jumps item (0-based).
+    var onJump: ((Int) -> Void)?
     private var firstVisible = 0
     /// How many panels the last `show` filled in (one per target screen).
     private var shownCount = 0
@@ -183,6 +194,7 @@ final class SwitcherPanel {
                 screenPanel.nameLabel?.attributedStringValue = selectedName(rows, selected)
                 if visible && !screenPanel.panel.isVisible { screenPanel.panel.orderFrontRegardless() }
             }
+            layoutColumns()
             return
         }
         lastContent = content
@@ -265,6 +277,7 @@ final class SwitcherPanel {
             if visible { panel.orderFrontRegardless() }
 
         }
+        layoutColumns()
     }
 
     // MARK: Icons layout
@@ -353,6 +366,7 @@ final class SwitcherPanel {
         tile.index = index
         tile.isPinned = r.isPinned
         tile.onMove = { [weak self] from, to in self?.onMovePin?(from, to) }
+        wireGroupDrag(tile)
         tile.onMouseDown = { [weak self] in self?.onHighlight?(index) }
         tile.onClick = { [weak self] in self?.onChoose?(index) }
         tile.toolTip = r.window.title
@@ -398,11 +412,19 @@ final class SwitcherPanel {
     /// For screenshot rendering: the (first) panel's window number and frame (screen coordinates).
     var windowNumber: Int { panels[0].panel.windowNumber }
     var frame: NSRect { panels[0].panel.frame }
+    /// The (first) panel's group boxes window, when it's showing.
+    var groupsWindow: NSWindow? { panels[0].column.panel.isVisible ? panels[0].column.panel : nil }
+    /// The (first) panel's Quick Jumps window, when it's showing.
+    var jumpsWindow: NSWindow? { panels[0].jumps.panel.isVisible ? panels[0].jumps.panel : nil }
 
     /// Shows panels already built by `show(..., visible: false)`. False if there's nothing built.
     func reveal() -> Bool {
         guard shownCount > 0 else { return false }
-        panels.prefix(shownCount).forEach { $0.panel.orderFrontRegardless() }
+        for screenPanel in panels.prefix(shownCount) {
+            screenPanel.panel.orderFrontRegardless()
+            if screenPanel.column.isBuilt { screenPanel.column.panel.orderFrontRegardless() }
+            if screenPanel.jumps.isBuilt { screenPanel.jumps.panel.orderFrontRegardless() }
+        }
         return true
     }
 
@@ -422,6 +444,10 @@ final class SwitcherPanel {
 
     func hide() {
         panels.forEach { $0.panel.orderOut(nil) }
+        groups = nil
+        jumps = []
+        isDraggingRow = false
+        layoutColumns()
         firstVisible = 0
         lastSelected = nil
         lastShow = nil
@@ -435,6 +461,204 @@ final class SwitcherPanel {
     }
 
     private var scrollerGutter: CGFloat { (12 * scale).rounded() }
+
+    // MARK: Window groups
+
+    /// A box beside the list: the group's name over previews of its windows.
+    struct Group: Equatable {
+        let name: String
+        let members: [Member]
+    }
+
+    struct Member: Equatable {
+        let id: CGWindowID
+        let caption: String     // under the preview: the window (page) title
+        let title: String       // tooltip: title and app name
+        let icon: NSImage?
+        let preview: NSImage?   // nil: show the app icon instead
+        var isOpen = true       // false: a placeholder for a window that isn't open, drawn dimmed
+    }
+
+    /// What the group boxes show: nil for none, [] when there are no groups yet
+    /// (the "+ New group" box still appears while a row is dragged).
+    private var groups: [Group]?
+    /// A row is being dragged: the "+ New group" box is shown, and other rebuilds wait for the
+    /// drop so the boxes don't move under the cursor.
+    private var isDraggingRow = false
+
+    /// The boxes go in their own window beside each panel; the list itself doesn't change.
+    func showGroups(_ groups: [Group]?) {
+        self.groups = groups
+        layoutColumns()
+    }
+
+    private func setDraggingRow(_ on: Bool) {
+        guard groups != nil, on != isDraggingRow else { return }
+        isDraggingRow = on
+        layoutColumns(force: true)
+    }
+
+    /// Builds (when their contents changed), places and shows each panel's side windows: the
+    /// group boxes and Quick Jumps. `force` rebuilds the groups even mid-drag (for the drag
+    /// starting or ending).
+    private func layoutColumns(force: Bool = false) {
+        for (i, screenPanel) in panels.enumerated() {
+            let column = screenPanel.column
+            if i < shownCount, let groups, !groups.isEmpty || isDraggingRow {
+                let key = GroupsKey(groups: groups, newGroupBox: isDraggingRow, fontSize: fontSize)
+                if key != column.key && (force || !isDraggingRow) { build(column, key) }
+            } else {
+                column.clear()
+            }
+            if i < shownCount, !jumps.isEmpty {
+                let key = JumpsKey(jumps: jumps, fontSize: fontSize)
+                if key != screenPanel.jumps.key { build(screenPanel.jumps, key) }
+            } else {
+                screenPanel.jumps.clear()
+            }
+            position(column, screenPanel.jumps, beside: screenPanel.panel)
+            if screenPanel.panel.isVisible {
+                if column.isBuilt && !column.panel.isVisible { column.panel.orderFrontRegardless() }
+                if screenPanel.jumps.isBuilt && !screenPanel.jumps.panel.isVisible { screenPanel.jumps.panel.orderFrontRegardless() }
+            }
+        }
+    }
+
+    private func build(_ column: SideColumn<GroupsKey>, _ key: GroupsKey) {
+        let width = (240 * scale).rounded(), pad = (8 * scale).rounded(), gap = (6 * scale).rounded()
+        let boxGap = (10 * scale).rounded(), titleHeight = (20 * scale).rounded()
+        let tileWidth = ((width - 2 * pad - gap) / 2).rounded(.down)
+        // Each tile: the preview, then up to two lines of title.
+        let captionFont = NSFont.systemFont(ofSize: 10.5 * scale)
+        let captionHeight = (2 * NSLayoutManager().defaultLineHeight(for: captionFont)).rounded(.up) + 2
+        let tileHeight = (tileWidth * 0.62).rounded() + captionHeight
+        var boxes: [GroupBoxView] = []
+        var y: CGFloat = 0
+        for (g, group) in key.groups.enumerated() {
+            let lines = CGFloat((group.members.count + 1) / 2)
+            let height = pad + titleHeight + lines * tileHeight + (lines - 1) * gap + pad
+            let box = GroupBoxView(frame: NSRect(x: 0, y: y, width: width, height: height), dropIndex: g, dashed: false)
+            let title = NSTextField(labelWithString: group.name)
+            title.font = .systemFont(ofSize: 11 * scale, weight: .semibold)
+            title.textColor = .secondaryLabelColor
+            title.lineBreakMode = .byTruncatingTail
+            title.frame = NSRect(x: pad + 2, y: pad - 2, width: width - 2 * pad - 4, height: titleHeight)
+            box.addContent(title)
+            for (m, member) in group.members.enumerated() {
+                let tile = GroupMemberTile(frame: NSRect(x: pad + CGFloat(m % 2) * (tileWidth + gap),
+                                                         y: pad + titleHeight + CGFloat(m / 2) * (tileHeight + gap),
+                                                         width: tileWidth, height: tileHeight),
+                                           member: member, captionFont: captionFont, captionHeight: captionHeight, scale: scale)
+                tile.onClick = { [weak self] in self?.onChooseMember?(g, m) }
+                tile.onRemove = { [weak self] in self?.onRemoveMember?(g, m) }
+                box.addContent(tile)
+            }
+            boxes.append(box)
+            y += height + boxGap
+        }
+        if key.newGroupBox {
+            let height = (52 * scale).rounded()
+            let box = GroupBoxView(frame: NSRect(x: 0, y: y, width: width, height: height), dropIndex: nil, dashed: true)
+            let label = NSTextField(labelWithString: "+ New group")
+            label.font = .systemFont(ofSize: 12 * scale, weight: .medium)
+            label.textColor = .secondaryLabelColor
+            label.sizeToFit()
+            label.frame.origin = NSPoint(x: ((width - label.frame.width) / 2).rounded(), y: ((height - label.frame.height) / 2).rounded())
+            box.addContent(label)
+            boxes.append(box)
+            y += height + boxGap
+        }
+        column.set(boxes, size: NSSize(width: width, height: max(y - boxGap, 1)), key: key)
+    }
+
+    /// Side windows go beside the list, top edges aligned: the groups on its left and Quick
+    /// Jumps on its right. One that doesn't fit on its side goes on the other, past anything
+    /// already there.
+    private func position(_ groups: SideColumn<GroupsKey>, _ jumps: SideColumn<JumpsKey>, beside list: NSPanel) {
+        let area = (list.screen ?? NSScreen.main)?.visibleFrame ?? list.frame
+        let gap = (12 * scale).rounded(), margin: CGFloat = 8
+        var left = list.frame.minX, right = list.frame.maxX
+        func place(_ window: NSPanel, size: NSSize, preferLeft: Bool) {
+            let width = size.width
+            let height = max(1, min(size.height, list.frame.maxY - area.minY - margin))
+            let fitsLeft = left - gap - width >= area.minX + margin
+            let fitsRight = right + gap + width <= area.maxX - margin
+            var x: CGFloat
+            if preferLeft ? fitsLeft || !fitsRight : !fitsRight && fitsLeft {
+                x = left - gap - width
+                left = x
+            } else {
+                x = right + gap
+                right = x + width
+            }
+            x = max(area.minX + margin, min(x, area.maxX - margin - width))
+            let frame = NSRect(x: x, y: list.frame.maxY - height, width: width, height: height)
+            if frame != window.frame {
+                window.setFrame(frame, display: true)
+                window.invalidateShadow()
+            }
+        }
+        if groups.isBuilt { place(groups.panel, size: groups.size, preferLeft: true) }
+        if jumps.isBuilt { place(jumps.panel, size: jumps.size, preferLeft: false) }
+    }
+
+    // MARK: Quick Jumps
+
+    /// A bookmark in the Quick Jumps box.
+    struct Jump: Equatable {
+        let name: String
+        let detail: String      // tooltip: the path or URL
+        let icon: NSImage?
+        var exists = true       // false: a moved or deleted file, drawn dimmed
+    }
+
+    /// What the Quick Jumps box shows; empty hides it.
+    private var jumps: [Jump] = []
+
+    /// The box goes in its own window to the right of each panel; the list itself doesn't change.
+    func showJumps(_ jumps: [Jump]) {
+        self.jumps = jumps
+        layoutColumns()
+    }
+
+    /// One box titled "Quick Jumps" with a row (icon and name) per bookmark.
+    private func build(_ column: SideColumn<JumpsKey>, _ key: JumpsKey) {
+        let width = (220 * scale).rounded(), pad = (8 * scale).rounded()
+        let titleHeight = (20 * scale).rounded(), rowHeight = (28 * scale).rounded()
+        let height = pad + titleHeight + CGFloat(key.jumps.count) * rowHeight + pad
+        let box = GroupBoxView(frame: NSRect(x: 0, y: 0, width: width, height: height), dropIndex: nil, dashed: false)
+        let title = NSTextField(labelWithString: "Quick Jumps")
+        title.font = .systemFont(ofSize: 11 * scale, weight: .semibold)
+        title.textColor = .secondaryLabelColor
+        title.frame = NSRect(x: pad + 2, y: pad - 2, width: width - 2 * pad - 4, height: titleHeight)
+        box.addContent(title)
+        for (i, jump) in key.jumps.enumerated() {
+            let row = JumpRow(frame: NSRect(x: pad, y: pad + titleHeight + CGFloat(i) * rowHeight,
+                                            width: width - 2 * pad, height: rowHeight),
+                              jump: jump, fontSize: fontSize, scale: scale)
+            row.onClick = { [weak self] in self?.onJump?(i) }
+            box.addContent(row)
+        }
+        column.set([box], size: NSSize(width: width, height: height), key: key)
+    }
+
+    /// Lets a row (or icon tile) be dragged out onto a group box.
+    private func wireGroupDrag(_ row: RowView) {
+        row.canDropOnGroups = { [weak self] in self?.groups != nil }
+        row.onDragChanged = { [weak self] in self?.setDraggingRow($0) }
+        row.dropTarget = { [weak self] in self?.dropTarget(at: $0) }
+        row.onDrop = { [weak self] row, group in self?.onDropOnGroup?(row, group) }
+    }
+
+    /// The group box under a point in screen coordinates, on any screen's groups column.
+    private func dropTarget(at point: NSPoint) -> GroupBoxView? {
+        for screenPanel in panels.prefix(shownCount) {
+            let column = screenPanel.column
+            guard column.panel.isVisible, column.panel.frame.contains(point) else { continue }
+            return column.boxes.first { column.panel.convertToScreen($0.convert($0.bounds, to: nil)).contains(point) }
+        }
+        return nil
+    }
 
     // MARK: Quick-launch bar
 
@@ -542,6 +766,7 @@ final class SwitcherPanel {
         row.onMove = { [weak self] from, to in self?.onMovePin?(from, to) }
         row.onMouseDown = { [weak self] in self?.onHighlight?(index) }
         row.onClick = { [weak self] in self?.onChoose?(index) }
+        wireGroupDrag(row)
         row.wantsLayer = true
         row.layer?.cornerRadius = 8 * scale
         row.heightAnchor.constraint(equalToConstant: rowHeight).isActive = true
@@ -601,13 +826,20 @@ final class SwitcherPanel {
 }
 
 /// A clickable row. The panel never becomes key or active, so accept the first click.
-/// Pinned rows can also be dragged onto other pinned rows to reorder them.
+/// Pinned rows can also be dragged onto other pinned rows to reorder them, and any row can be
+/// dragged out onto a group box beside the panel.
 private final class RowView: NSView {
     var index = 0
     var isPinned = false
     var onMouseDown: (() -> Void)?
     var onClick: (() -> Void)?
     var onMove: ((_ from: Int, _ to: Int) -> Void)?
+    /// Whether group boxes are offered, so unpinned rows can be dragged too.
+    var canDropOnGroups: (() -> Bool)?
+    var onDragChanged: ((Bool) -> Void)?
+    /// The group box under a point in screen coordinates.
+    var dropTarget: ((NSPoint) -> GroupBoxView?)?
+    var onDrop: ((_ row: Int, _ group: Int?) -> Void)?
     /// Restyles the row's subviews for the selected / unselected look.
     var highlight: ((Bool) -> Void)?
     private var isHighlighted = false
@@ -625,7 +857,9 @@ private final class RowView: NSView {
     // the current rows, instead of relying on later events reaching this view.
     override func mouseDown(with event: NSEvent) {
         let (onClick, onMove, index, isPinned) = (onClick, onMove, index, isPinned)
+        let (onDragChanged, dropTarget, onDrop) = (onDragChanged, dropTarget, onDrop)
         guard let window, let content = window.contentView else { return }
+        let draggable = isPinned || canDropOnGroups?() == true
         onMouseDown?()
         func rowUnder(_ e: NSEvent) -> RowView? {
             let point = content.superview?.convert(e.locationInWindow, from: nil) ?? e.locationInWindow
@@ -634,18 +868,33 @@ private final class RowView: NSView {
         let start = event.locationInWindow
         var current = index
         var dragging = false
+        var box: GroupBoxView?
         while let e = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged], until: .distantFuture, inMode: .eventTracking, dequeue: true) {
             if e.type == .leftMouseUp {
-                if dragging { NSCursor.pop() } else if rowUnder(e)?.index == index { onClick?() }
+                if dragging {
+                    NSCursor.pop()
+                    box?.setDropHighlighted(false)
+                    if let box { onDrop?(current, box.dropIndex) }
+                    onDragChanged?(false)
+                } else if rowUnder(e)?.index == index {
+                    onClick?()
+                }
                 return
             }
-            guard isPinned else { continue }
+            guard draggable else { continue }
             if !dragging {
                 guard hypot(e.locationInWindow.x - start.x, e.locationInWindow.y - start.y) > 4 else { continue }
                 dragging = true
                 NSCursor.closedHand.push()
+                onDragChanged?(true)
             }
-            if let target = rowUnder(e), target.isPinned, target.index != current {
+            let over = dropTarget?(window.convertPoint(toScreen: e.locationInWindow))
+            if over !== box {
+                box?.setDropHighlighted(false)
+                over?.setDropHighlighted(true)
+                box = over
+            }
+            if box == nil, isPinned, let target = rowUnder(e), target.isPinned, target.index != current {
                 onMove?(current, target.index)
                 current = target.index
             }
@@ -791,6 +1040,295 @@ private final class PinButton: NSImageView {
     func style(highlighted: Bool) {
         contentTintColor = pinned ? (highlighted ? .white : .systemOrange)
                                   : (highlighted ? NSColor.white.withAlphaComponent(0.5) : .quaternaryLabelColor)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+}
+
+/// What a groups column is built from; an equal key means the built boxes are current.
+private struct GroupsKey: Equatable {
+    var groups: [SwitcherPanel.Group]
+    var newGroupBox: Bool
+    var fontSize: CGFloat
+}
+
+/// What the Quick Jumps column is built from.
+private struct JumpsKey: Equatable {
+    var jumps: [SwitcherPanel.Jump]
+    var fontSize: CGFloat
+}
+
+/// A window of boxes stacked top to bottom beside the list panel (the group boxes, or Quick
+/// Jumps): a separate borderless window, so the list itself is untouched. It's clear, so each
+/// box reads (and casts a shadow) as its own card; a tall column scrolls.
+private final class SideColumn<Key: Equatable> {
+    let panel: NSPanel
+    private let scrollView = NSScrollView()
+    private(set) var boxes: [GroupBoxView] = []
+    private(set) var key: Key?
+    private(set) var size = NSSize.zero
+    var isBuilt: Bool { key != nil }
+
+    init() {
+        panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        panel.level = .popUpMenu
+        panel.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        scrollView.drawsBackground = false
+        scrollView.contentView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.documentView = FlippedView()
+        panel.contentView = scrollView
+    }
+
+    func set(_ boxes: [GroupBoxView], size: NSSize, key: Key) {
+        guard let document = scrollView.documentView else { return }
+        document.subviews.forEach { $0.removeFromSuperview() }
+        boxes.forEach(document.addSubview)
+        document.frame = NSRect(origin: .zero, size: size)
+        document.scroll(.zero)
+        (self.boxes, self.size, self.key) = (boxes, size, key)
+        panel.invalidateShadow()
+    }
+
+    func clear() {
+        guard isBuilt || panel.isVisible else { return }
+        panel.orderOut(nil)
+        scrollView.documentView?.subviews.forEach { $0.removeFromSuperview() }
+        (boxes, key) = ([], nil)
+    }
+}
+
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+/// A group's box, or the dashed "+ New group" box shown while a row is dragged. Highlights
+/// while a dragged row is over it.
+private final class GroupBoxView: NSVisualEffectView {
+    /// The group a row dropped here joins; nil starts a new group.
+    let dropIndex: Int?
+    /// Border and drop tint, drawn over the content.
+    private let overlay = PassthroughView()
+    private var dash: CAShapeLayer?
+
+    override var isFlipped: Bool { true }
+
+    init(frame: NSRect, dropIndex: Int?, dashed: Bool) {
+        self.dropIndex = dropIndex
+        super.init(frame: frame)
+        material = .hudWindow
+        blendingMode = .behindWindow
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = 14
+        layer?.masksToBounds = true
+        overlay.frame = bounds
+        overlay.wantsLayer = true
+        overlay.layer?.cornerRadius = 14
+        if dashed {
+            let dash = CAShapeLayer()
+            dash.path = CGPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), cornerWidth: 13, cornerHeight: 13, transform: nil)
+            dash.fillColor = nil
+            dash.lineWidth = 1.5
+            dash.lineDashPattern = [6, 4]
+            overlay.layer?.addSublayer(dash)
+            self.dash = dash
+        }
+        addSubview(overlay)
+        setDropHighlighted(false)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func addContent(_ view: NSView) {
+        addSubview(view, positioned: .below, relativeTo: overlay)
+    }
+
+    func setDropHighlighted(_ on: Bool) {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let accent = NSColor.controlAccentColor
+            overlay.layer?.backgroundColor = on ? accent.withAlphaComponent(0.15).cgColor : nil
+            if let dash {
+                dash.strokeColor = (on ? accent : NSColor.tertiaryLabelColor).cgColor
+            } else {
+                overlay.layer?.borderWidth = on ? 2 : 1
+                overlay.layer?.borderColor = (on ? accent : NSColor.separatorColor).cgColor
+            }
+        }
+    }
+}
+
+/// Draws over its siblings without taking their clicks.
+private final class PassthroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// A group member: the window's preview with its app icon as a corner badge, or just the
+/// icon, large, when there's no preview. A click switches to the window; the "×" shown on
+/// hover takes it out of the group.
+private final class GroupMemberTile: NSView {
+    var onClick: (() -> Void)?
+    var onRemove: (() -> Void)?
+    private let remove = RemoveButton()
+
+    override var isFlipped: Bool { true }
+
+    init(frame: NSRect, member: SwitcherPanel.Member, captionFont: NSFont, captionHeight: CGFloat, scale: CGFloat) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 6 * scale
+        toolTip = member.title
+        let inset = (4 * scale).rounded()
+        var area = bounds.insetBy(dx: inset, dy: inset)
+        area.size.height -= captionHeight
+        let caption = NSTextField(wrappingLabelWithString: member.caption)
+        caption.font = captionFont
+        caption.textColor = .labelColor
+        caption.alignment = .center
+        caption.maximumNumberOfLines = 2
+        caption.lineBreakMode = .byWordWrapping
+        caption.cell?.truncatesLastVisibleLine = true
+        caption.frame = NSRect(x: 2, y: area.maxY + 2, width: bounds.width - 4, height: captionHeight)
+        addSubview(caption)
+        if let preview = member.preview, preview.size.width > 0, preview.size.height > 0 {
+            // Fit the preview's own shape, so its rounded corners are the image's corners.
+            let fit = min(area.width / preview.size.width, area.height / preview.size.height)
+            let size = NSSize(width: (preview.size.width * fit).rounded(), height: (preview.size.height * fit).rounded())
+            let image = NSView(frame: NSRect(x: (area.midX - size.width / 2).rounded(), y: (area.midY - size.height / 2).rounded(),
+                                             width: size.width, height: size.height))
+            image.wantsLayer = true
+            image.layer?.contents = preview
+            image.layer?.contentsGravity = .resize
+            image.layer?.cornerRadius = 4 * scale
+            image.layer?.masksToBounds = true
+            image.layer?.borderWidth = 0.5
+            image.layer?.borderColor = NSColor.black.withAlphaComponent(0.25).cgColor
+            addSubview(image)
+            let badgeSize = (22 * scale).rounded()
+            let badge = NSImageView(image: member.icon ?? NSImage())
+            badge.imageScaling = .scaleProportionallyUpOrDown
+            badge.frame = NSRect(x: min(image.frame.maxX - badgeSize * 0.75, bounds.maxX - badgeSize),
+                                 y: min(image.frame.maxY - badgeSize * 0.75, area.maxY + inset - badgeSize),
+                                 width: badgeSize, height: badgeSize)
+            addSubview(badge)
+        } else {
+            let iconSize = min((36 * scale).rounded(), area.height)
+            let icon = NSImageView(image: member.icon ?? NSImage())
+            icon.imageScaling = .scaleProportionallyUpOrDown
+            icon.frame = NSRect(x: (area.midX - iconSize / 2).rounded(), y: (area.midY - iconSize / 2).rounded(),
+                                width: iconSize, height: iconSize)
+            if !member.isOpen {
+                // A dashed outline where the preview would be, and the icon and title faded.
+                let outline = CAShapeLayer()
+                outline.path = CGPath(roundedRect: area, cornerWidth: 4 * scale, cornerHeight: 4 * scale, transform: nil)
+                outline.fillColor = nil
+                outline.strokeColor = NSColor.tertiaryLabelColor.cgColor
+                outline.lineWidth = 1
+                outline.lineDashPattern = [4, 3]
+                layer?.addSublayer(outline)
+                icon.alphaValue = 0.45
+                caption.textColor = .secondaryLabelColor
+            }
+            addSubview(icon)
+        }
+        let removeSize = (16 * scale).rounded()
+        remove.frame = NSRect(x: bounds.maxX - removeSize - 1, y: 1, width: removeSize, height: removeSize)
+        remove.isHidden = true
+        remove.onClick = { [weak self] in self?.onRemove?() }
+        addSubview(remove)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    // The preview and badge are just pictures: clicks on them are the tile's.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        return hit === remove ? remove : self
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { setHovered(true) }
+    override func mouseExited(with event: NSEvent) { setHovered(false) }
+
+    private func setHovered(_ on: Bool) {
+        layer?.backgroundColor = on ? NSColor.labelColor.withAlphaComponent(0.12).cgColor : nil
+        remove.isHidden = !on
+    }
+}
+
+/// A Quick Jumps bookmark: its icon and name. Highlights on hover; a click opens it.
+private final class JumpRow: NSView {
+    var onClick: (() -> Void)?
+
+    override var isFlipped: Bool { true }
+
+    init(frame: NSRect, jump: SwitcherPanel.Jump, fontSize: CGFloat, scale: CGFloat) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 6 * scale
+        toolTip = jump.exists ? jump.detail : "\(jump.detail)\nNot found"
+        let iconSize = (20 * scale).rounded(), inset = (6 * scale).rounded()
+        let icon = NSImageView(image: jump.icon ?? NSImage())
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.frame = NSRect(x: inset, y: ((bounds.height - iconSize) / 2).rounded(), width: iconSize, height: iconSize)
+        let name = NSTextField(labelWithString: jump.name)
+        name.font = .systemFont(ofSize: fontSize * 0.93)
+        name.textColor = jump.exists ? .labelColor : .secondaryLabelColor
+        name.lineBreakMode = .byTruncatingMiddle
+        let nameHeight = name.intrinsicContentSize.height
+        let nameX = icon.frame.maxX + inset
+        name.frame = NSRect(x: nameX, y: ((bounds.height - nameHeight) / 2).rounded(),
+                            width: bounds.width - nameX - inset, height: nameHeight)
+        if !jump.exists { icon.alphaValue = 0.45 }
+        addSubview(icon)
+        addSubview(name)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    // The icon and name are just pictures: clicks on them are the row's.
+    override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor }
+    override func mouseExited(with event: NSEvent) { layer?.backgroundColor = nil }
+}
+
+/// The "×" on a hovered group member. Handles its own clicks so they don't switch to the window.
+private final class RemoveButton: NSImageView {
+    var onClick: (() -> Void)?
+
+    init() {
+        super.init(frame: .zero)
+        image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Remove from group")
+        symbolConfiguration = NSImage.SymbolConfiguration(paletteColors: [.white, NSColor.black.withAlphaComponent(0.6)])
+        imageScaling = .scaleProportionallyUpOrDown
+        toolTip = "Remove from group"
     }
 
     required init?(coder: NSCoder) { fatalError() }

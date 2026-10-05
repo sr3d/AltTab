@@ -67,6 +67,26 @@ enum Settings {
         }
     }
 
+    /// Bookmarks in the Quick Jumps box beside the switcher, in order.
+    static var quickJumps: [QuickJump] {
+        get {
+            // Never set: start with Home and Downloads. An emptied list stays empty.
+            guard let stored = defaults.array(forKey: "quickJumps") as? [[String: String]] else {
+                return QuickJump.defaults
+            }
+            return stored.compactMap { d in
+                d["url"].flatMap(URL.init(string:)).map { QuickJump(url: $0, name: d["name"]) }
+            }
+        }
+        set {
+            defaults.set(newValue.map { jump in
+                var d = ["url": jump.url.absoluteString]
+                if let name = jump.customName { d["name"] = name }
+                return d
+            }, forKey: "quickJumps")
+        }
+    }
+
     /// Show the switcher on every display, or only on the one under the mouse.
     static var showOnAllScreens: Bool {
         get { showOnAllScreensOverride ?? defaults.object(forKey: "showOnAllScreens") as? Bool ?? true }
