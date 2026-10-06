@@ -16,7 +16,7 @@ Cmd+Tab activates a whole app, so every window of that app jumps forward and bur
   <sub>macOS 13 or later · Apple Silicon and Intel · <a href="#install">install steps</a> · <a href="https://github.com/sr3d/AltTab/releases">all releases</a></sub>
 </p>
 
-<p align="center"><img src="docs/switcher.png" width="620" alt="The switcher panel"></p>
+<p align="center"><img src="docs/groups.png" width="820" alt="The switcher with Quick Launch, window groups and Quick Jumps"></p>
 
 ## Install
 1. Click **Download for macOS** above (or pick a version from [Releases](https://github.com/sr3d/AltTab/releases)), open the DMG, and drag `AltTab.app` onto the `Applications` shortcut.
@@ -48,7 +48,7 @@ Turn on **Launch at Login** from the menu-bar menu or Preferences.
 
 <p align="center"><img src="docs/apps-icons.png" width="620" alt="Cmd+Tab app switcher, icons layout"></p>
 
-<p align="center"><img src="docs/groups.png" width="720" alt="Window groups beside the switcher"></p>
+<p align="center"><img src="docs/switcher.png" width="620" alt="The switcher panel"></p>
 
 ## Usage
 | Keys | Action |

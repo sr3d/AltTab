@@ -24,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         loginItem.target = self
         secureInputItem.target = self
         secureInputItem.isHidden = true
+        // Which build is running; no action, so it shows greyed out.
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        menu.addItem(NSMenuItem(title: version.map { "AltTab \($0)" } ?? "AltTab (development build)", action: nil, keyEquivalent: ""))
+        menu.addItem(.separator())
         menu.addItem(secureInputItem)
         menu.addItem(accessibilityItem)
         menu.addItem(loginItem)

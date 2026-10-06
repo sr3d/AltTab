@@ -52,7 +52,7 @@ enum Screenshots {
             return panelWindow(panel)
         }
         shoot("groups.png") {
-            panel.show(rows(indexed), selected: 3, query: "", stayOpen: true)
+            panel.show(rows(indexed), selected: 3, query: "", stayOpen: false, launchers: demoLaunchers())
             panel.showGroups(demoGroups(demo))
             panel.showJumps(demoJumps())
             return panelWindow(panel)
