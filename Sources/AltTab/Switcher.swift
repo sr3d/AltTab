@@ -44,6 +44,8 @@ final class Switcher {
     /// Called when the panel switches to stay-open mode on its own (mouse use), so the
     /// hotkey stops treating an Option release as "switch now".
     var onStayOpen: (() -> Void)?
+    /// "Edit" in the Quick Jumps box: open their Preferences.
+    var onEditJumps: (() -> Void)?
 
     init(tracker: WindowTracker) {
         self.tracker = tracker
@@ -106,6 +108,10 @@ final class Switcher {
             let jump = jumps[index]
             finish(focusing: nil)
             QuickJumps.open(jump)
+        }
+        panel.onEditJumps = { [weak self] in
+            self?.finish(focusing: nil)
+            self?.onEditJumps?()
         }
         panel.onRemoveMember = { [weak self] group, member in
             guard let self else { return }

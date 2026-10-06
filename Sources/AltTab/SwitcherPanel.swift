@@ -105,6 +105,8 @@ final class SwitcherPanel {
     var onRemoveMember: ((_ group: Int, _ member: Int) -> Void)?
     /// Click on a Quick Jumps item (0-based).
     var onJump: ((Int) -> Void)?
+    /// Click on "Edit" in the Quick Jumps box.
+    var onEditJumps: (() -> Void)?
     private var firstVisible = 0
     /// How many panels the last `show` filled in (one per target screen).
     private var shownCount = 0
@@ -632,6 +634,12 @@ final class SwitcherPanel {
         title.textColor = .secondaryLabelColor
         title.frame = NSRect(x: pad + 2, y: pad - 2, width: width - 2 * pad - 4, height: titleHeight)
         box.addContent(title)
+        let edit = LinkLabel(title: "Edit", fontSize: 11 * scale)
+        edit.toolTip = "Edit Quick Jumps in Preferences"
+        edit.onClick = { [weak self] in self?.onEditJumps?() }
+        let editWidth = edit.intrinsicContentSize.width.rounded(.up) + 4
+        edit.frame = NSRect(x: width - pad - 2 - editWidth, y: pad - 2, width: editWidth, height: titleHeight)
+        box.addContent(edit)
         for (i, jump) in key.jumps.enumerated() {
             let row = JumpRow(frame: NSRect(x: pad, y: pad + titleHeight + CGFloat(i) * rowHeight,
                                             width: width - 2 * pad, height: rowHeight),
@@ -1317,6 +1325,28 @@ private final class JumpRow: NSView {
 
     override func mouseEntered(with event: NSEvent) { layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor }
     override func mouseExited(with event: NSEvent) { layer?.backgroundColor = nil }
+}
+
+/// A small text link, like "Edit" in the Quick Jumps box: link colored, pointing-hand cursor.
+private final class LinkLabel: NSTextField {
+    var onClick: (() -> Void)?
+
+    init(title: String, fontSize: CGFloat) {
+        super.init(frame: .zero)
+        stringValue = title
+        font = .systemFont(ofSize: fontSize, weight: .medium)
+        textColor = .linkColor
+        isEditable = false
+        isSelectable = false
+        isBordered = false
+        drawsBackground = false
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
 
 /// The "×" on a hovered group member. Handles its own clicks so they don't switch to the window.

@@ -35,7 +35,7 @@ Turn on **Launch at Login** from the menu-bar menu or Preferences.
 - **Window groups:** drag the windows you're working with out of the list into a group. Groups sit as boxes beside the list, showing a preview of each window with its app icon, and one click switches to that exact window. They show with both the window list and the Cmd+Tab app list; dragging an app in adds its most recent window. The list itself doesn't change.
 - **Number keys:** press 1–9 or 0 to jump straight to a row. Pinned windows get the first numbers.
 - **Quick Launch:** keep the apps you use all the time (Finder, Slack, Activity Monitor…) as icons at the top of the switcher, and open one with Shift+1–9, 0 or a key you pick: Cmd+Tab, then C for Calendar.
-- **Quick Jumps:** bookmarks for the folders, files and web pages you open all the time, in a box to the right of the list. One click opens a folder in Finder, a file in its app or a URL in your browser. Add them in Preferences by dragging them in from Finder (or links from a browser) or with +.
+- **Quick Jumps:** bookmarks for the folders, files and web pages you open all the time, in a box to the right of the list. One click opens a folder in Finder, a file in its app or a URL in your browser. Add them in Preferences (or click **Edit** in the box to go straight there) by dragging them in from Finder (or links from a browser) or with +.
 - **Quick filter:** start typing to narrow the list by window title or app name.
 - **Keyboard or mouse:** arrow keys, Tab/Shift+Tab, hover, the scroll wheel and clicks all work. Long lists get a scrollbar you can drag.
 - **Adjustable size:** set the font size in Preferences; the whole panel scales with it.

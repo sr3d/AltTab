@@ -51,11 +51,25 @@ final class PreferencesWindow: NSWindowController {
     func show(_ tab: Tab = .general) {
         sync()
         tabs.selectedTabViewItemIndex = tab.rawValue
-        window?.center()
+        centerOnMouseScreen()
         // We're a menu-bar (accessory) app, so bring ourselves forward for the window to get focus.
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Centers on the screen with the mouse pointer: the one where "Edit" or the menu bar was
+    /// clicked. `center()` would pick the main screen, which can be another display.
+    private func centerOnMouseScreen() {
+        guard let window else { return }
+        let mouse = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main else {
+            window.center()
+            return
+        }
+        let area = screen.visibleFrame, size = window.frame.size
+        window.setFrameOrigin(NSPoint(x: (area.midX - size.width / 2).rounded(),
+                                      y: (area.midY - size.height / 2).rounded()))
     }
 
     // MARK: General

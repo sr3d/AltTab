@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tap.onAction = { [weak self] in self?.switcher.handle($0) }
         switcher.onDismiss = { [weak self] in self?.tap.deactivate() }
         switcher.onStayOpen = { [weak self] in self?.tap.enterStayOpen() }
+        switcher.onEditJumps = { [weak self] in self?.preferences.show(.quickJumps) }
 
         let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         if AXIsProcessTrustedWithOptions(prompt) {
