@@ -92,4 +92,10 @@ enum Settings {
         get { showOnAllScreensOverride ?? defaults.object(forKey: "showOnAllScreens") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "showOnAllScreens") }
     }
+
+    /// Menu bar shows only the ⌥ icon instead of the "AltTab" label, to save space.
+    static var menuBarIconOnly: Bool {
+        get { defaults.bool(forKey: "menuBarIconOnly") }
+        set { defaults.set(newValue, forKey: "menuBarIconOnly") }
+    }
 }

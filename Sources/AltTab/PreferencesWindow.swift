@@ -1,8 +1,8 @@
 import AppKit
 import ServiceManagement
 
-/// Preferences: a General tab (font size, Cmd+Tab takeover, all displays, launch at login),
-/// a Quick Launch tab (apps in the bar at the top of the switcher), a Quick Jumps tab (folders,
+/// Preferences: a General tab (font size, Cmd+Tab takeover, all displays, launch at login,
+/// menu bar icon), a Quick Launch tab (apps in the bar at the top of the switcher), a Quick Jumps tab (folders,
 /// files and URLs in the box beside it) and an About tab.
 /// Changes are saved immediately; `onChange` lets the app apply them (e.g. the Cmd+Tab hotkey).
 final class PreferencesWindow: NSWindowController {
@@ -26,6 +26,7 @@ final class PreferencesWindow: NSWindowController {
     private let allWindowsRadio = NSButton(radioButtonWithTitle: "All of the app's windows (like macOS)", target: nil, action: nil)
     private let recentWindowRadio = NSButton(radioButtonWithTitle: "Only its most recent window", target: nil, action: nil)
     private let loginBox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
+    private let iconOnlyBox = NSButton(checkboxWithTitle: "Show only the ⌥ icon in the menu bar", target: nil, action: nil)
     private let allScreensBox = NSButton(checkboxWithTitle: "Show switcher on all displays", target: nil, action: nil)
     private let contentWidth: CGFloat = 440
     private let quickLaunchEditor = QuickLaunchEditor()
@@ -124,10 +125,12 @@ final class PreferencesWindow: NSWindowController {
         let allScreensNote = note("With multiple displays, show the switcher on every screen. When off, it appears only on the screen with the mouse pointer.")
         loginBox.target = self
         loginBox.action = #selector(loginChanged)
+        iconOnlyBox.target = self
+        iconOnlyBox.action = #selector(iconOnlyChanged)
 
         let stack = NSStackView(views: [fontTitle, fontRow, preview, separator(),
                                         switcherTitle, takeoverBox, takeoverNote, modeRadios, radios, separator(),
-                                        generalTitle, allScreensBox, allScreensNote, loginBox])
+                                        generalTitle, allScreensBox, allScreensNote, loginBox, iconOnlyBox])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
@@ -174,6 +177,12 @@ final class PreferencesWindow: NSWindowController {
         sync()
     }
 
+    @objc private func iconOnlyChanged() {
+        Settings.menuBarIconOnly = iconOnlyBox.state == .on
+        sync()
+        onChange?()
+    }
+
     @objc private func loginChanged() {
         let service = SMAppService.mainApp
         do {
@@ -184,7 +193,8 @@ final class PreferencesWindow: NSWindowController {
         sync()
     }
 
-    private func sync() {
+    /// Updates the controls from Settings, e.g. after the menu-bar menu changed one.
+    func sync() {
         let size = Settings.fontSize
         slider.doubleValue = Double(size)
         valueLabel.stringValue = "\(Int(size)) pt"
@@ -207,6 +217,7 @@ final class PreferencesWindow: NSWindowController {
         bringLabel.textColor = takeover ? .labelColor : .disabledControlTextColor
         allScreensBox.state = Settings.showOnAllScreens ? .on : .off
         loginBox.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        iconOnlyBox.state = Settings.menuBarIconOnly ? .on : .off
     }
 
     // MARK: Quick Launch

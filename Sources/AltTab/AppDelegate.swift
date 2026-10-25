@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let secureInputItem = NSMenuItem(title: "", action: #selector(showSecureInputHolder), keyEquivalent: "")
     private let accessibilityItem = NSMenuItem(title: "", action: #selector(openAccessibilitySettings), keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+    private let iconOnlyItem = NSMenuItem(title: "Show Only Icon in Menu Bar", action: #selector(toggleIconOnly), keyEquivalent: "")
     private lazy var preferences = PreferencesWindow()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -22,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         accessibilityItem.target = self
         loginItem.target = self
+        iconOnlyItem.target = self
         secureInputItem.target = self
         secureInputItem.isHidden = true
         // Which build is running; no action, so it shows greyed out.
@@ -31,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(secureInputItem)
         menu.addItem(accessibilityItem)
         menu.addItem(loginItem)
+        menu.addItem(iconOnlyItem)
         let prefsItem = NSMenuItem(title: "Preferences…", action: #selector(showPreferences), keyEquivalent: ",")
         prefsItem.target = self
         menu.addItem(prefsItem)
@@ -52,7 +55,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // it's re-disabled in activate() once the event tap is running.
         NativeCommandTab.setEnabled(true)
         NativeCommandTab.installRestoreHandlers()
-        preferences.onChange = { [weak self] in self?.applyCommandTabSetting() }
+        preferences.onChange = { [weak self] in
+            self?.applyCommandTabSetting()
+            self?.updateStatusTitle()
+        }
 
         tap.onAction = { [weak self] in self?.switcher.handle($0) }
         switcher.onDismiss = { [weak self] in self?.tap.deactivate() }
@@ -112,18 +118,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Secure Input wins over the ⚠︎: it's what is blocking the shortcuts right now.
+    /// In icon-only mode the ⌥ symbol stands in for "AltTab", and the ⚠︎ or ✕ follows it.
     private func updateStatusTitle() {
         guard let button = statusItem.button else { return }
+        let iconOnly = Settings.menuBarIconOnly
+        let name = iconOnly ? "" : "AltTab"
+        button.image = iconOnly ? Self.menuBarIcon : nil
         if let pid = secureInputPID {
-            let title = NSMutableAttributedString(string: "AltTab ")
+            let title = NSMutableAttributedString(string: iconOnly ? " " : "AltTab ")
             title.append(NSAttributedString(string: "✕", attributes: [.foregroundColor: NSColor.systemRed]))
             button.attributedTitle = title
             button.toolTip = "Secure Input is on (\(Self.processName(pid))) — AltTab can't see keystrokes"
         } else {
-            button.title = trusted ? "AltTab" : "AltTab ⚠︎"
-            button.toolTip = nil
+            button.title = trusted ? name : name + " ⚠︎"
+            button.toolTip = iconOnly ? "AltTab" : nil
         }
+        button.imagePosition = button.title.isEmpty ? .imageOnly : .imageLeading
     }
+
+    private static let menuBarIcon: NSImage? = {
+        let image = NSImage(systemSymbolName: "option", accessibilityDescription: "AltTab")
+        image?.isTemplate = true
+        return image
+    }()
 
     /// PID of the process holding Secure Keyboard Entry, which blinds our event tap; nil if none.
     private static func secureInputHolder() -> pid_t? {
@@ -173,11 +190,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("AltTab: launch at login failed: \(error)")
         }
     }
+
+    @objc private func toggleIconOnly() {
+        Settings.menuBarIconOnly.toggle()
+        updateStatusTitle()
+        preferences.sync()
+    }
 }
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        iconOnlyItem.state = Settings.menuBarIconOnly ? .on : .off
         refreshSecureInput()
         updateStatus(trusted: AXIsProcessTrusted())
     }

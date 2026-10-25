@@ -24,7 +24,7 @@ Cmd+Tab activates a whole app, so every window of that app jumps forward and bur
    ```sh
    xattr -dr com.apple.quarantine /Applications/AltTab.app
    ```
-3. Launch it and grant **Accessibility** when asked (System Settings → Privacy & Security → Accessibility). The menu-bar label reads `AltTab ⚠︎` until the permission is active, then just `AltTab`.
+3. Launch it and grant **Accessibility** when asked (System Settings → Privacy & Security → Accessibility). The menu-bar label reads `AltTab ⚠︎` until the permission is active, then just `AltTab` (or just the ⌥ icon, if you turn on **Show only the ⌥ icon in the menu bar** in Preferences → General).
 
 Turn on **Launch at Login** from the menu-bar menu or Preferences.
 
